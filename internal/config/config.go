@@ -27,6 +27,10 @@ type Config struct {
 
 	APIAddr     string
 	FileAddr    string
+
+	// API security.
+	APIInsecureLocal bool // accept unauthenticated /v1 on loopback only
+	APIRequireReveal bool // ?reveal=1 needs a token with the reveal scope
 	FirmwareDir string
 
 	HookURL         string
@@ -108,6 +112,20 @@ func (l *loader) size(name string, def int64) int64 {
 	return n
 }
 
+func (l *loader) boolean(name string, def bool) bool {
+	raw := strings.ToLower(strings.TrimSpace(l.getenv(name)))
+	switch raw {
+	case "":
+		return def
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	}
+	l.fail("%s: %q is not a boolean", name, raw)
+	return def
+}
+
 func (l *loader) addr(name, def string) string {
 	v := l.str(name, def)
 	if _, _, err := net.SplitHostPort(v); err != nil {
@@ -143,6 +161,8 @@ func Load(getenv func(string) string) (Config, error) {
 		CWMPMaxBody:        l.size("CWMP_MAX_BODY", 10<<20),
 		CWMPMaxSessions:    l.integer("CWMP_MAX_SESSIONS", 1000),
 		APIAddr:            l.addr("OPTICORE_API_ADDR", ":8081"),
+		APIInsecureLocal:   l.boolean("OPTICORE_API_INSECURE_LOCAL", false),
+		APIRequireReveal:   l.boolean("OPTICORE_API_REQUIRE_REVEAL", true),
 		FileAddr:           l.addr("OPTICORE_FILE_ADDR", ":8082"),
 		FirmwareDir:        l.str("OPTICORE_FIRMWARE_DIR", "/var/lib/opticore/firmware"),
 		HookURL:            l.str("OPTICORE_HOOK_URL", ""),

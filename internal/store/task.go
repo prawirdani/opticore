@@ -121,7 +121,7 @@ func (s *Store) CreateTasks(ctx context.Context, deviceIDorSerial string, tasks 
 // StartTask moves a pending task to running and increments attempts.
 func (s *Store) StartTask(ctx context.Context, id int64) error {
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE tasks SET status = 'running', attempts = attempts + 1
+		`UPDATE tasks SET status = 'running', attempts = attempts + 1, updated_at = now()
 		WHERE id = $1 AND status = 'pending'`, id)
 	if err != nil {
 		return fmt.Errorf("store: start task: %w", err)
@@ -142,8 +142,8 @@ func (s *Store) FinishTask(ctx context.Context, id int64, status string, result 
 		res = result
 	}
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE tasks SET status = $2, result = $3, fault_code = $4, fault = $5
-		WHERE id = $1`, id, status, res, faultCode, fault)
+		`UPDATE tasks SET status = $2, result = $3, fault_code = $4, fault = $5,
+			updated_at = now() WHERE id = $1`, id, status, res, faultCode, fault)
 	if err != nil {
 		return fmt.Errorf("store: finish task: %w", err)
 	}
@@ -155,7 +155,7 @@ func (s *Store) FinishTask(ctx context.Context, id int64, status string, result 
 
 // CancelBatchRest cancels the pending tasks of a batch after the given seq.
 func (s *Store) CancelBatchRest(ctx context.Context, batchID string, afterSeq int) error {
-	if _, err := s.pool.Exec(ctx, `UPDATE tasks SET status = 'cancelled'
+	if _, err := s.pool.Exec(ctx, `UPDATE tasks SET status = 'cancelled', updated_at = now()
 		WHERE batch_id = $1::uuid AND batch_seq > $2 AND status = 'pending'`,
 		batchID, afterSeq); err != nil {
 		return fmt.Errorf("store: cancel batch: %w", err)
@@ -166,7 +166,8 @@ func (s *Store) CancelBatchRest(ctx context.Context, batchID string, afterSeq in
 // RequeueTask returns a running task to pending for a retry.
 func (s *Store) RequeueTask(ctx context.Context, id int64) error {
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE tasks SET status = 'pending' WHERE id = $1 AND status = 'running'`, id)
+		`UPDATE tasks SET status = 'pending', updated_at = now()
+		WHERE id = $1 AND status = 'running'`, id)
 	if err != nil {
 		return fmt.Errorf("store: requeue task: %w", err)
 	}
@@ -195,7 +196,7 @@ func (s *Store) ListTasks(ctx context.Context, deviceIDorSerial string, limit in
 
 // ExpireTasks marks runnable-past tasks expired. It is the janitor's sweep.
 func (s *Store) ExpireTasks(ctx context.Context) (int64, error) {
-	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET status = 'expired'
+	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET status = 'expired', updated_at = now()
 		WHERE status = 'pending' AND expires_at <= now()`)
 	if err != nil {
 		return 0, fmt.Errorf("store: expire tasks: %w", err)

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/prawirdani/opticore/internal/acs"
+	"github.com/prawirdani/opticore/internal/api"
 	"github.com/prawirdani/opticore/internal/config"
 	"github.com/prawirdani/opticore/internal/cwmp"
 	"github.com/prawirdani/opticore/internal/store"
@@ -35,6 +36,7 @@ const usage = `usage: opticore <command> [args]
   task <serial|id> set <path> <value> [type]
   task <serial|id> reboot
   wake <serial|id>
+  token create <name> --scope read,write[,reveal]
 `
 
 func main() {
@@ -61,6 +63,8 @@ func main() {
 		err = cmdTask(ctx, args)
 	case "wake":
 		err = cmdWake(ctx, args)
+	case "token":
+		err = cmdToken(ctx, args)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -112,14 +116,15 @@ func serve(ctx context.Context) error {
 	cs.Start()
 	defer cs.Stop()
 
-	mux := http.NewServeMux()
-	mux.Handle("/", cs)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+	svc := &acs.Service{Store: st, Key: cfg.SecretKey, Waker: wake.New(cfg.CWMPCRTimeout, log), Logger: log}
+	cwmpMux := http.NewServeMux()
+	cwmpMux.Handle("/", cs)
+	cwmpMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		health(w, r, st)
 	})
 	srv := &http.Server{
 		Addr:              cfg.CWMPAddr,
-		Handler:           mux,
+		Handler:           cwmpMux,
 		ConnContext:       cs.ConnContext,
 		ReadHeaderTimeout: cfg.CWMPRequestTimeout,
 		ReadTimeout:       cfg.CWMPRequestTimeout,
@@ -127,13 +132,35 @@ func serve(ctx context.Context) error {
 		IdleTimeout:       cfg.CWMPSessionTimeout,
 	}
 
+	apiSrv := api.New(st, svc, cfg.SecretKey, log, api.Options{
+		AllowInsecureLocal: cfg.APIInsecureLocal,
+		RequireRevealScope: cfg.APIRequireReveal,
+		ListenAddr:         cfg.APIAddr,
+	})
+	if err := apiSrv.Err(); err != nil {
+		return err
+	}
+	apiMux := http.NewServeMux()
+	apiMux.Handle("/", apiSrv.Handler())
+	apiMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		health(w, r, st)
+	})
+	apiHTTP := &http.Server{
+		Addr:              cfg.APIAddr,
+		Handler:           apiMux,
+		ReadHeaderTimeout: cfg.CWMPRequestTimeout,
+		IdleTimeout:       cfg.CWMPSessionTimeout,
+	}
+
 	janitorCtx, cancelJanitor := context.WithCancel(ctx)
 	defer cancelJanitor()
 	go janitor(janitorCtx, st, log)
 
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
 	go func() { errc <- srv.ListenAndServe() }()
-	log.Info("opticore listening", "cwmp", cfg.CWMPAddr)
+	go func() { errc <- apiHTTP.ListenAndServe() }()
+	log.Info("opticore listening", "cwmp", cfg.CWMPAddr, "api", cfg.APIAddr,
+		"api_auth", !cfg.APIInsecureLocal)
 
 	select {
 	case err := <-errc:
@@ -143,7 +170,12 @@ func serve(ctx context.Context) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.CWMPSessionTimeout)
 	defer cancel()
 	log.Info("shutting down")
-	return srv.Shutdown(shutdownCtx)
+	apiSrv.Close()
+	apiErr := apiHTTP.Shutdown(shutdownCtx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return err
+	}
+	return apiErr
 }
 
 func health(w http.ResponseWriter, r *http.Request, st *store.Store) {
@@ -380,6 +412,36 @@ func cmdWake(ctx context.Context, args []string) error {
 			return err
 		}
 		fmt.Println("connection request accepted")
+		return nil
+	})
+}
+
+func cmdToken(ctx context.Context, args []string) error {
+	if len(args) < 2 || args[0] != "create" {
+		return errors.New("usage: token create <name> --scope read,write[,reveal]")
+	}
+	name := args[1]
+	fl, _ := split(args[2:])
+	fs := flag.NewFlagSet("token create", flag.ContinueOnError)
+	scopes := fs.String("scope", "read", "comma-separated scopes: read, write, reveal")
+	if err := fs.Parse(fl); err != nil {
+		return err
+	}
+	sc := strings.Split(*scopes, ",")
+	for i := range sc {
+		sc[i] = strings.TrimSpace(sc[i])
+		switch sc[i] {
+		case "read", "write", "reveal":
+		default:
+			return fmt.Errorf("unknown scope %q", sc[i])
+		}
+	}
+	return withStore(ctx, func(st *store.Store, _ config.Config) error {
+		tok, err := st.CreateToken(ctx, name, sc)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("token %q created with scopes %s\n%s\n(shown once)\n", name, strings.Join(sc, ","), tok)
 		return nil
 	})
 }

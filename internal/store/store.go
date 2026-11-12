@@ -74,6 +74,7 @@ type Task struct {
 	CreatedAt time.Time
 	RunAt     time.Time
 	ExpiresAt time.Time
+	UpdatedAt time.Time
 	IdemKey   *string
 }
 
@@ -106,7 +107,7 @@ type InformRecord struct {
 	// been wiped, so the parameter cache is replaced instead of merged.
 	Bootstrap bool
 	Events    []string
-	Params      map[string]Param
+	Params    map[string]Param
 }
 
 // Store owns the pool. TaskExpiry is the minimum pending task lifetime used by
@@ -207,7 +208,7 @@ const deviceCols = `id, serial, oui, product_class, software_version, first_info
 
 const taskCols = `id, device_id, job_id, batch_id::text, batch_seq, name, args,
 	prev, result, status, attempts, fault_code, fault, created_at, run_at,
-	expires_at, idem_key`
+	expires_at, updated_at, idem_key`
 
 func scanDevice(row pgx.Row) (Device, error) {
 	var (
@@ -242,7 +243,7 @@ func scanTask(row pgx.Row) (Task, error) {
 	)
 	err := row.Scan(&t.ID, &t.DeviceID, &t.JobID, &t.BatchID, &t.BatchSeq,
 		&t.Name, &args, &prev, &result, &t.Status, &t.Attempts, &t.FaultCode,
-		&t.Fault, &t.CreatedAt, &t.RunAt, &t.ExpiresAt, &t.IdemKey)
+		&t.Fault, &t.CreatedAt, &t.RunAt, &t.ExpiresAt, &t.UpdatedAt, &t.IdemKey)
 	if err != nil {
 		return Task{}, err
 	}

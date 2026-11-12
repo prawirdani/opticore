@@ -595,7 +595,8 @@ network error cannot reboot a device twice.
 | `PUT /firmware/:file` | upload an image; stores SHA-256 and the product-class allowlist |
 
 Task names, paths and values are TR-069 as-is; Opticore does not translate
-them. `:id` is the ACS id or the serial.
+them. `:id` is the ACS id or the serial. `opticore token create <name> --scope
+read,write[,reveal]` mints a token (printed once).
 
 **Read plane:** `GET /devices`, `/devices/:id`, `/devices/:id/params`,
 `/devices/:id/tasks`, `/devices/:id/events`, `/tasks/:taskId`, `/jobs`,
@@ -740,7 +741,7 @@ existing ACS stays.
 The first release is every stage below; the spike gate (§14) still comes first
 and is unchanged.
 
-1. HTTP API (control + read planes, tokens) and SSE;
+1. *(shipped)* HTTP API (control + read planes, tokens) and SSE;
 2. inform hook (step loop, prefetch, timeouts, SSE fallback) and the Go SDK in
    `client/` including `HookHandler` (§7, §10); tag `v0.1.0`;
 3. ordered task batches, `AddObject` / `DeleteObject` with instance references;
@@ -973,6 +974,8 @@ non-zero with a readable error. The TUI and subcommands need only
 | `CWMP_MAX_BODY` | `10MiB` | largest accepted request body (after decompression) |
 | `CWMP_MAX_SESSIONS` | `1000` | concurrent sessions before `503` + `Retry-After` |
 | `OPTICORE_API_ADDR` | `:8081` | HTTP API (`/v1`) and SSE |
+| `OPTICORE_API_INSECURE_LOCAL` | `false` | accept `/v1` without a token; refused unless the listener binds loopback |
+| `OPTICORE_API_REQUIRE_REVEAL` | `true` | `?reveal=1` needs a token with the `reveal` scope |
 | `OPTICORE_FILE_ADDR` | `:8082` | firmware file server, device-facing |
 | `OPTICORE_FIRMWARE_DIR` | `/var/lib/opticore/firmware` | firmware image storage |
 | `OPTICORE_HOOK_URL` | — | inform hook endpoint (`http://…` or `unix:/path.sock`); unset = no hook |

@@ -65,9 +65,13 @@ func (svc *Service) Enqueue(ctx context.Context, idOrSerial string, tasks []stor
 			due = true
 		}
 	}
-	if due && len(out) > 0 {
-		if err := svc.Wake(ctx, out[0].DeviceID); err != nil && svc.Logger != nil {
-			svc.Logger.Warn("wake after enqueue failed; tasks run at next inform", "device_id", out[0].DeviceID, "err", err)
+	if due && len(out) > 0 && svc.Waker != nil {
+		// Coalesced fire-and-forget wake: many tasks queued in a burst share one
+		// connection request (§5). Failures are logged by the waker.
+		if t, err := svc.wakeTarget(ctx, out[0].DeviceID); err != nil {
+			svc.warn("cannot wake after enqueue; tasks run at next inform", out[0].DeviceID, err)
+		} else {
+			svc.Waker.Request(t)
 		}
 	}
 	return out, nil
@@ -128,22 +132,36 @@ func (svc *Service) Wake(ctx context.Context, idOrSerial string) error {
 	if svc.Waker == nil {
 		return nil
 	}
-	d, err := svc.Store.GetDevice(ctx, idOrSerial)
+	t, err := svc.wakeTarget(ctx, idOrSerial)
 	if err != nil {
 		return err
 	}
+	return svc.Waker.Wake(ctx, t)
+}
+
+func (svc *Service) wakeTarget(ctx context.Context, idOrSerial string) (wake.Target, error) {
+	d, err := svc.Store.GetDevice(ctx, idOrSerial)
+	if err != nil {
+		return wake.Target{}, err
+	}
 	if d.CRURL == "" {
-		return errors.New("device has not reported a ConnectionRequestURL")
+		return wake.Target{}, errors.New("device has not reported a ConnectionRequestURL")
 	}
 	t := wake.Target{DeviceID: d.ID, URL: d.CRURL, Username: d.CRUsername}
 	if d.CRPassword != "" {
 		p, err := store.OpenSecret(svc.Key, d.CRPassword)
 		if err != nil {
-			return fmt.Errorf("decrypt connection-request password: %w", err)
+			return wake.Target{}, fmt.Errorf("decrypt connection-request password: %w", err)
 		}
 		t.Password = string(p)
 	}
-	return svc.Waker.Wake(ctx, t)
+	return t, nil
+}
+
+func (svc *Service) warn(msg, deviceID string, err error) {
+	if svc.Logger != nil {
+		svc.Logger.Warn(msg, "device_id", deviceID, "err", err)
+	}
 }
 
 func isCRPath(path string) bool {
