@@ -219,3 +219,26 @@ func resolveDevice(ctx context.Context, q rowQuerier, idOrSerial string) (string
 	}
 	return id, interval, nil
 }
+
+// PendingTasks returns the device's runnable pending tasks, in run order.
+// The CWMP session re-reads it when its queue drains, to pick up tasks
+// enqueued while the session was open.
+func (s *Store) PendingTasks(ctx context.Context, deviceID string) ([]Task, error) {
+	rows, err := s.pool.Query(ctx, selectPendingTasksSQL, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("store: pending tasks: %w", err)
+	}
+	return scanTasks(rows)
+}
+
+// SetTaskPrev records the values a set task is about to overwrite (§8).
+func (s *Store) SetTaskPrev(ctx context.Context, id int64, prev json.RawMessage) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET prev = $2 WHERE id = $1`, id, []byte(prev))
+	if err != nil {
+		return fmt.Errorf("store: set task prev: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrTaskNotFound
+	}
+	return nil
+}

@@ -261,3 +261,6 @@ func scanTasks(rows pgx.Rows) ([]Task, error) {
 	}
 	return tasks, rows.Err()
 }
+
+// Pool exposes the connection pool for test setup (truncation, fixtures).
+func (s *Store) Pool() *pgxpool.Pool { return s.pool }

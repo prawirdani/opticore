@@ -37,12 +37,12 @@ func TestAppendGolden(t *testing.T) {
 		{
 			"InformResponse",
 			AppendInformResponse(nil, "1.0", "42"),
-			`<cwmp:InformResponse><cwmp:MaxEnvelopes>1</cwmp:MaxEnvelopes></cwmp:InformResponse>`,
+			`<cwmp:InformResponse><MaxEnvelopes>1</MaxEnvelopes></cwmp:InformResponse>`,
 		},
 		{
 			"GetRPCMethodsResponse",
 			AppendGetRPCMethodsResponse(nil, "1.0", "42"),
-			`<cwmp:GetRPCMethodsResponse><cwmp:MethodList soap-enc:arrayType="xsd:string[3]"><xsd:string>Inform</xsd:string><xsd:string>GetRPCMethods</xsd:string><xsd:string>TransferComplete</xsd:string></cwmp:MethodList></cwmp:GetRPCMethodsResponse>`,
+			`<cwmp:GetRPCMethodsResponse><MethodList soap-enc:arrayType="xsd:string[3]"><string>Inform</string><string>GetRPCMethods</string><string>TransferComplete</string></MethodList></cwmp:GetRPCMethodsResponse>`,
 		},
 		{
 			"TransferCompleteResponse",
@@ -52,32 +52,32 @@ func TestAppendGolden(t *testing.T) {
 		{
 			"GetParameterValues",
 			AppendGetParameterValues(nil, "1.0", "42", []string{"a.b", "c.d"}),
-			`<cwmp:GetParameterValues><cwmp:ParameterNames soap-enc:arrayType="xsd:string[2]"><xsd:string>a.b</xsd:string><xsd:string>c.d</xsd:string></cwmp:ParameterNames></cwmp:GetParameterValues>`,
+			`<cwmp:GetParameterValues><ParameterNames soap-enc:arrayType="xsd:string[2]"><string>a.b</string><string>c.d</string></ParameterNames></cwmp:GetParameterValues>`,
 		},
 		{
 			"GetParameterNames",
 			AppendGetParameterNames(nil, "1.0", "42", "Device.WiFi.SSID.", true),
-			`<cwmp:GetParameterNames><cwmp:ParameterPath>Device.WiFi.SSID.</cwmp:ParameterPath><cwmp:NextLevel>1</cwmp:NextLevel></cwmp:GetParameterNames>`,
+			`<cwmp:GetParameterNames><ParameterPath>Device.WiFi.SSID.</ParameterPath><NextLevel>1</NextLevel></cwmp:GetParameterNames>`,
 		},
 		{
 			"SetParameterValues",
 			AppendSetParameterValues(nil, "1.0", "42", spvParams, "task-1"),
-			`<cwmp:SetParameterValues><cwmp:ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[2]"><cwmp:ParameterValueStruct><cwmp:Name>Device.WiFi.SSID.1.SSID</cwmp:Name><cwmp:Value xsi:type="xsd:string">HOME</cwmp:Value></cwmp:ParameterValueStruct><cwmp:ParameterValueStruct><cwmp:Name>Device.IP.Interface.1.Enable</cwmp:Name><cwmp:Value xsi:type="xsd:boolean">1</cwmp:Value></cwmp:ParameterValueStruct></cwmp:ParameterList><cwmp:ParameterKey>task-1</cwmp:ParameterKey></cwmp:SetParameterValues>`,
+			`<cwmp:SetParameterValues><ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[2]"><ParameterValueStruct><Name>Device.WiFi.SSID.1.SSID</Name><Value xsi:type="xsd:string">HOME</Value></ParameterValueStruct><ParameterValueStruct><Name>Device.IP.Interface.1.Enable</Name><Value xsi:type="xsd:boolean">1</Value></ParameterValueStruct></ParameterList><ParameterKey>task-1</ParameterKey></cwmp:SetParameterValues>`,
 		},
 		{
 			"AddObject",
 			AppendAddObject(nil, "1.0", "42", "Device.WiFi.SSID.", "task-1"),
-			`<cwmp:AddObject><cwmp:ObjectName>Device.WiFi.SSID.</cwmp:ObjectName><cwmp:ParameterKey>task-1</cwmp:ParameterKey></cwmp:AddObject>`,
+			`<cwmp:AddObject><ObjectName>Device.WiFi.SSID.</ObjectName><ParameterKey>task-1</ParameterKey></cwmp:AddObject>`,
 		},
 		{
 			"DeleteObject",
 			AppendDeleteObject(nil, "1.0", "42", "Device.WiFi.SSID.3.", "task-1"),
-			`<cwmp:DeleteObject><cwmp:ObjectName>Device.WiFi.SSID.3.</cwmp:ObjectName><cwmp:ParameterKey>task-1</cwmp:ParameterKey></cwmp:DeleteObject>`,
+			`<cwmp:DeleteObject><ObjectName>Device.WiFi.SSID.3.</ObjectName><ParameterKey>task-1</ParameterKey></cwmp:DeleteObject>`,
 		},
 		{
 			"Reboot",
 			AppendReboot(nil, "1.0", "42", "task-1"),
-			`<cwmp:Reboot><cwmp:CommandKey>task-1</cwmp:CommandKey></cwmp:Reboot>`,
+			`<cwmp:Reboot><CommandKey>task-1</CommandKey></cwmp:Reboot>`,
 		},
 		{
 			"FactoryReset",
@@ -87,7 +87,7 @@ func TestAppendGolden(t *testing.T) {
 		{
 			"Download",
 			AppendDownload(nil, "1.0", "42", "fw-1", "1 Firmware Upgrade Image", "http://acs.example/fw.bin", "u", "p", 123456789, "fw.bin", 30, "http://acs.example/ok", "http://acs.example/fail"),
-			`<cwmp:Download><cwmp:CommandKey>fw-1</cwmp:CommandKey><cwmp:FileType>1 Firmware Upgrade Image</cwmp:FileType><cwmp:URL>http://acs.example/fw.bin</cwmp:URL><cwmp:Username>u</cwmp:Username><cwmp:Password>p</cwmp:Password><cwmp:FileSize>123456789</cwmp:FileSize><cwmp:TargetFileName>fw.bin</cwmp:TargetFileName><cwmp:DelaySeconds>30</cwmp:DelaySeconds><cwmp:SuccessURL>http://acs.example/ok</cwmp:SuccessURL><cwmp:FailureURL>http://acs.example/fail</cwmp:FailureURL></cwmp:Download>`,
+			`<cwmp:Download><CommandKey>fw-1</CommandKey><FileType>1 Firmware Upgrade Image</FileType><URL>http://acs.example/fw.bin</URL><Username>u</Username><Password>p</Password><FileSize>123456789</FileSize><TargetFileName>fw.bin</TargetFileName><DelaySeconds>30</DelaySeconds><SuccessURL>http://acs.example/ok</SuccessURL><FailureURL>http://acs.example/fail</FailureURL></cwmp:Download>`,
 		},
 	}
 	for _, tc := range cases {
@@ -137,7 +137,7 @@ func TestAppendEscaping(t *testing.T) {
 		`&lt;x&gt; "q" 'a'`,
 		`xsi:type="x&quot;y"`,
 		`<cwmp:ID soap-env:mustUnderstand="1">id&amp;&lt;&gt;</cwmp:ID>`,
-		`<cwmp:ParameterKey>k&amp;k</cwmp:ParameterKey>`,
+		`<ParameterKey>k&amp;k</ParameterKey>`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in %s", want, out)

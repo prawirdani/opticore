@@ -1051,5 +1051,8 @@ Authorization: Bearer {OPTICORE_HOOK_SECRET}
 - Advisory lock: a second daemon against the same database refuses to start.
 - Secret regex: `Password`, `KeyPassphrase`, `PreSharedKey` match;
   `ParameterKey` does not.
-- Store tests run against a real PostgreSQL in CI; skip without a DSN.
+- Store tests run against a real PostgreSQL in CI; skip without a DSN. Each
+  run uses its own schema, but advisory locks are per database, so stop any
+  running daemon on the same database first (or point the tests at another
+  one).
 - No test talks to a device. The lab cutover is a manual gate, not a unit test.
