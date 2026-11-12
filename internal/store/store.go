@@ -1,0 +1,263 @@
+// Package store is the PostgreSQL data layer: pgx/v5 with hand-written SQL.
+package store
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
+
+	"github.com/prawirdani/opticore/migrations"
+)
+
+// leaderLockKey is a constant advisory-lock key ("opticore" in ASCII).
+const leaderLockKey int64 = 0x6F707469636F7265
+
+var (
+	ErrAnotherDaemon  = errors.New("another opticore daemon holds the advisory lock")
+	ErrDeviceNotFound = errors.New("device not found")
+	ErrTaskNotFound   = errors.New("task not found")
+	ErrTaskNotPending = errors.New("task is not pending")
+)
+
+// Param is one cached parameter leaf, serialised into devices.params.
+type Param struct {
+	Value     string     `json:"value,omitempty"`
+	Type      string     `json:"type,omitempty"`
+	Writable  *bool      `json:"writable,omitempty"`
+	Secret    bool       `json:"secret,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+// Device is a row of devices, keyed by the ACS id.
+type Device struct {
+	ID              string
+	Serial          string
+	OUI             string
+	ProductClass    string
+	SoftwareVersion string
+	FirstInform     time.Time
+	LastInform      time.Time
+	InformInterval  int
+	LastAddr        string
+	CRURL           string
+	CRUsername      string
+	CRPassword      string
+	CRSetAt         *time.Time
+	PendingReboot   bool
+	LastFault       json.RawMessage
+	Params          map[string]Param
+}
+
+// Task is a row of tasks.
+type Task struct {
+	ID        int64
+	DeviceID  string
+	JobID     *int64
+	BatchID   *string
+	BatchSeq  int
+	Name      string
+	Args      json.RawMessage
+	Prev      json.RawMessage
+	Result    json.RawMessage
+	Status    string
+	Attempts  int
+	FaultCode *int
+	Fault     string
+	CreatedAt time.Time
+	RunAt     time.Time
+	ExpiresAt time.Time
+	IdemKey   *string
+}
+
+// Event is a row of events.
+type Event struct {
+	ID       int64
+	DeviceID string
+	At       time.Time
+	Type     string
+	Detail   json.RawMessage
+}
+
+// InformRecord is everything an Inform writes.
+type InformRecord struct {
+	ID              string
+	Serial          string
+	OUI             string
+	ProductClass    string
+	SoftwareVersion string
+	InformInterval  int
+	LastAddr        string
+	CRURL           string
+	// At is when the ACS received the Inform (server clock); zero means now.
+	At time.Time
+	// CurrentTime is the device's own clock from the Inform. A retried Inform
+	// repeats it, which makes the event dedupe key stable. Implausible values
+	// (zero, or before 2000, common right after boot) disable dedupe.
+	CurrentTime time.Time
+	Events      []string
+	Params      map[string]Param
+}
+
+// Store owns the pool. TaskExpiry is the minimum pending task lifetime used by
+// CreateTasks; zero means 10 minutes.
+type Store struct {
+	pool       *pgxpool.Pool
+	TaskExpiry time.Duration
+
+	leader        *pgxpool.Conn
+	releaseLeader func()
+}
+
+// Open creates a pool and verifies the database is reachable.
+func Open(ctx context.Context, dsn string) (*Store, error) {
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("store: open: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("store: ping: %w", err)
+	}
+	return &Store{pool: pool}, nil
+}
+
+// Close releases the leadership lock, if held, and the pool.
+func (s *Store) Close() {
+	if s.releaseLeader != nil {
+		s.releaseLeader()
+		s.releaseLeader = nil
+	}
+	s.pool.Close()
+}
+
+// Migrate applies the embedded goose migrations.
+func (s *Store) Migrate(ctx context.Context) error {
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("postgres"); err != nil {
+		return fmt.Errorf("store: migrate: %w", err)
+	}
+	db := stdlib.OpenDBFromPool(s.pool)
+	defer db.Close()
+	if err := goose.UpContext(ctx, db, "."); err != nil {
+		return fmt.Errorf("store: migrate: %w", err)
+	}
+	return nil
+}
+
+// AcquireLeader takes the single-daemon advisory lock on a pinned connection.
+// Call it once at startup; the lock dies with the connection.
+func (s *Store) AcquireLeader(ctx context.Context) (func(), error) {
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: acquire leader connection: %w", err)
+	}
+	var once sync.Once
+	var ok bool
+	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, leaderLockKey).Scan(&ok); err != nil {
+		conn.Release()
+		return nil, fmt.Errorf("store: advisory lock: %w", err)
+	}
+	if !ok {
+		conn.Release()
+		return nil, ErrAnotherDaemon
+	}
+	release := func() {
+		once.Do(func() {
+			_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, leaderLockKey)
+			conn.Release()
+		})
+	}
+	s.leader = conn
+	s.releaseLeader = release
+	return release, nil
+}
+
+// Ping reports database reachability.
+func (s *Store) Ping(ctx context.Context) error {
+	return s.pool.Ping(ctx)
+}
+
+// NewestInform returns the newest devices.last_inform, or the zero time when
+// no device has ever informed.
+func (s *Store) NewestInform(ctx context.Context) (time.Time, error) {
+	var at *time.Time
+	if err := s.pool.QueryRow(ctx, `SELECT max(last_inform) FROM devices`).Scan(&at); err != nil {
+		return time.Time{}, fmt.Errorf("store: newest inform: %w", err)
+	}
+	if at == nil {
+		return time.Time{}, nil
+	}
+	return *at, nil
+}
+
+const deviceCols = `id, serial, oui, product_class, software_version, first_inform,
+	last_inform, inform_interval, last_addr, cr_url, cr_username, cr_password,
+	cr_set_at, pending_reboot, last_fault, params`
+
+const taskCols = `id, device_id, job_id, batch_id::text, batch_seq, name, args,
+	prev, result, status, attempts, fault_code, fault, created_at, run_at,
+	expires_at, idem_key`
+
+func scanDevice(row pgx.Row) (Device, error) {
+	var (
+		d         Device
+		lastFault []byte
+		params    []byte
+	)
+	err := row.Scan(&d.ID, &d.Serial, &d.OUI, &d.ProductClass, &d.SoftwareVersion,
+		&d.FirstInform, &d.LastInform, &d.InformInterval, &d.LastAddr, &d.CRURL,
+		&d.CRUsername, &d.CRPassword, &d.CRSetAt, &d.PendingReboot, &lastFault, &params)
+	if err != nil {
+		return Device{}, err
+	}
+	if len(lastFault) > 0 {
+		d.LastFault = lastFault
+	}
+	d.Params = map[string]Param{}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &d.Params); err != nil {
+			return Device{}, fmt.Errorf("store: decode params: %w", err)
+		}
+	}
+	return d, nil
+}
+
+func scanTask(row pgx.Row) (Task, error) {
+	var (
+		t      Task
+		args   []byte
+		prev   []byte
+		result []byte
+	)
+	err := row.Scan(&t.ID, &t.DeviceID, &t.JobID, &t.BatchID, &t.BatchSeq,
+		&t.Name, &args, &prev, &result, &t.Status, &t.Attempts, &t.FaultCode,
+		&t.Fault, &t.CreatedAt, &t.RunAt, &t.ExpiresAt, &t.IdemKey)
+	if err != nil {
+		return Task{}, err
+	}
+	t.Args = args
+	t.Prev = prev
+	t.Result = result
+	return t, nil
+}
+
+func scanTasks(rows pgx.Rows) ([]Task, error) {
+	defer rows.Close()
+	tasks := []Task{}
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
