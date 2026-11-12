@@ -91,6 +91,7 @@ func (h *Sessions) Inform(ctx context.Context, s *cwmp.Session, in *cwmp.Inform)
 			bootstrap = true
 		}
 	}
+	rec.Bootstrap = bootstrap
 	dev, tasks, err := h.Store.RecordInform(ctx, rec)
 	if err != nil {
 		return err

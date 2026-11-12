@@ -102,7 +102,10 @@ type InformRecord struct {
 	// repeats it, which makes the event dedupe key stable. Implausible values
 	// (zero, or before 2000, common right after boot) disable dedupe.
 	CurrentTime time.Time
-	Events      []string
+	// Bootstrap is a "0 BOOTSTRAP" inform: the device's configuration may have
+	// been wiped, so the parameter cache is replaced instead of merged.
+	Bootstrap bool
+	Events    []string
 	Params      map[string]Param
 }
 

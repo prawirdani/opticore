@@ -28,7 +28,8 @@ ON CONFLICT (id) DO UPDATE SET
 		THEN EXCLUDED.cr_url ELSE devices.cr_url END,
 	inform_interval = CASE WHEN EXCLUDED.inform_interval > 0
 		THEN EXCLUDED.inform_interval ELSE devices.inform_interval END,
-	params = devices.params || EXCLUDED.params
+	params = CASE WHEN $12 THEN EXCLUDED.params ELSE devices.params || EXCLUDED.params END,
+	pending_reboot = CASE WHEN $12 THEN false ELSE devices.pending_reboot END
 RETURNING ` + deviceCols
 
 const insertEventSQL = `INSERT INTO events (device_id, at, type, detail, dedupe_key)
@@ -64,7 +65,7 @@ func (s *Store) RecordInform(ctx context.Context, in InformRecord) (Device, []Ta
 
 	b := &pgx.Batch{}
 	b.Queue(upsertDeviceSQL, in.ID, in.Serial, in.OUI, in.ProductClass,
-		in.SoftwareVersion, at, at, in.InformInterval, in.LastAddr, in.CRURL, params)
+		in.SoftwareVersion, at, at, in.InformInterval, in.LastAddr, in.CRURL, params, in.Bootstrap)
 	for _, code := range in.Events {
 		typ := eventType(code)
 		detail, err := json.Marshal(struct {

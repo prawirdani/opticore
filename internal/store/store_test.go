@@ -120,6 +120,41 @@ func sampleInform(at time.Time) InformRecord {
 	}
 }
 
+// A factory reset (0 BOOTSTRAP) must not keep pre-reset leaves in the cache.
+func TestBootstrapReplacesParamsAndClearsPendingReboot(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	at := time.Now().UTC()
+	in := sampleInform(at)
+	if _, _, err := s.RecordInform(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPendingReboot(ctx, in.ID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	reset := sampleInform(at.Add(time.Minute))
+	reset.Bootstrap = true
+	reset.CurrentTime = reset.At
+	reset.Events = []string{"0 BOOTSTRAP"}
+	reset.Params = map[string]Param{
+		"InternetGatewayDevice.DeviceInfo.SoftwareVersion": {Value: "V5R020C10S271", Type: "xsd:string"},
+	}
+	dev, _, err := s.RecordInform(ctx, reset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, still := dev.Params["InternetGatewayDevice.ManagementServer.ConnectionRequestURL"]; still {
+		t.Error("pre-reset parameter survived the bootstrap")
+	}
+	if len(dev.Params) != 1 {
+		t.Errorf("params = %v, want only the inform parameters", dev.Params)
+	}
+	if dev.PendingReboot {
+		t.Error("pending_reboot survived the bootstrap")
+	}
+}
+
 func TestRecordInformUpsertAndDedupe(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
