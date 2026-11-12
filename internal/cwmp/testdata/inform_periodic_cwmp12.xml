@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap-env:Envelope xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-2">
+  <soap-env:Header>
+    <cwmp:ID soap-env:mustUnderstand="1">3457</cwmp:ID>
+    <cwmp:HoldRequests soap-env:mustUnderstand="1">0</cwmp:HoldRequests>
+    <cwmp:sessionTimeout>120</cwmp:sessionTimeout>
+  </soap-env:Header>
+  <soap-env:Body>
+    <cwmp:Inform>
+      <cwmp:DeviceID>
+        <cwmp:Manufacturer>Huawei</cwmp:Manufacturer>
+        <cwmp:OUI>00259E</cwmp:OUI>
+        <cwmp:ProductClass>EG8145V5</cwmp:ProductClass>
+        <cwmp:SerialNumber>HWTC0A1B2C3D</cwmp:SerialNumber>
+      </cwmp:DeviceID>
+      <cwmp:EventList soap-enc:arrayType="cwmp:EventStruct[1]">
+        <cwmp:EventStruct>
+          <cwmp:EventCode>2 PERIODIC</cwmp:EventCode>
+          <cwmp:CommandKey></cwmp:CommandKey>
+        </cwmp:EventStruct>
+      </cwmp:EventList>
+      <cwmp:MaxEnvelopes>1</cwmp:MaxEnvelopes>
+      <cwmp:CurrentTime>2024-05-02T03:14:15Z</cwmp:CurrentTime>
+      <cwmp:RetryCount>1</cwmp:RetryCount>
+      <cwmp:ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[2]">
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.DeviceInfo.UpTime</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:unsignedInt">90312</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.ManagementServer.ConnectionRequestURL</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">http://100.64.7.12:7547/</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+      </cwmp:ParameterList>
+    </cwmp:Inform>
+  </soap-env:Body>
+</soap-env:Envelope>

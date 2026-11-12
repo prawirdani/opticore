@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap-env:Envelope xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-1">
+  <soap-env:Header>
+    <cwmp:ID soap-env:mustUnderstand="1">5521</cwmp:ID>
+  </soap-env:Header>
+  <soap-env:Body>
+    <cwmp:GetParameterNamesResponse>
+      <cwmp:ParameterList soap-enc:arrayType="cwmp:ParameterInfoStruct[5]">
+        <cwmp:ParameterInfoStruct>
+          <cwmp:Name>Device.WiFi.SSID.</cwmp:Name>
+          <cwmp:Writable>0</cwmp:Writable>
+        </cwmp:ParameterInfoStruct>
+        <cwmp:ParameterInfoStruct>
+          <cwmp:Name>Device.WiFi.SSID.1.</cwmp:Name>
+          <cwmp:Writable>0</cwmp:Writable>
+        </cwmp:ParameterInfoStruct>
+        <cwmp:ParameterInfoStruct>
+          <cwmp:Name>Device.WiFi.SSID.1.SSID</cwmp:Name>
+          <cwmp:Writable>1</cwmp:Writable>
+        </cwmp:ParameterInfoStruct>
+        <cwmp:ParameterInfoStruct>
+          <cwmp:Name>Device.WiFi.SSID.1.Enable</cwmp:Name>
+          <cwmp:Writable>1</cwmp:Writable>
+        </cwmp:ParameterInfoStruct>
+        <cwmp:ParameterInfoStruct>
+          <cwmp:Name>Device.WiFi.SSID.1.Status</cwmp:Name>
+          <cwmp:Writable>0</cwmp:Writable>
+        </cwmp:ParameterInfoStruct>
+      </cwmp:ParameterList>
+    </cwmp:GetParameterNamesResponse>
+  </soap-env:Body>
+</soap-env:Envelope>

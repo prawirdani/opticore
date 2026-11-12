@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap-env:Envelope xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-2">
+  <soap-env:Header>
+    <cwmp:ID soap-env:mustUnderstand="1">88125</cwmp:ID>
+  </soap-env:Header>
+  <soap-env:Body>
+    <cwmp:TransferComplete>
+      <cwmp:CommandKey>firmware-2024-03</cwmp:CommandKey>
+      <cwmp:FaultStruct>
+        <cwmp:FaultCode>0</cwmp:FaultCode>
+        <cwmp:FaultString></cwmp:FaultString>
+      </cwmp:FaultStruct>
+      <cwmp:StartTime>2024-03-11T09:14:00+00:00</cwmp:StartTime>
+      <cwmp:CompleteTime>2024-03-11T09:19:32+00:00</cwmp:CompleteTime>
+    </cwmp:TransferComplete>
+  </soap-env:Body>
+</soap-env:Envelope>

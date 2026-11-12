@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap-env:Envelope xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soap-env:Header>
+    <cwmp:ID soap-env:mustUnderstand="1">88121</cwmp:ID>
+  </soap-env:Header>
+  <soap-env:Body>
+    <cwmp:GetParameterValuesResponse>
+      <cwmp:ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[4]">
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.SSID.1.SSID</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">HOME-7F2A</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.1.Security.KeyPassphrase</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">secret &amp; more</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.IP.Interface.1.Enable</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:boolean">true</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.DeviceInfo.UpTime</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:unsignedInt">4212</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+      </cwmp:ParameterList>
+    </cwmp:GetParameterValuesResponse>
+  </soap-env:Body>
+</soap-env:Envelope>

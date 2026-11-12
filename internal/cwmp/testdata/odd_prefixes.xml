@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- captured from a vendor build that uppercases every namespace prefix -->
+<SOAP-ENV:Envelope xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:XSD="http://www.w3.org/2001/XMLSchema" xmlns:XSI="http://www.w3.org/2001/XMLSchema-instance" xmlns:CWMP="urn:dslforum-org:cwmp-1-1">
+  <SOAP-ENV:Header>
+    <CWMP:ID SOAP-ENV:mustUnderstand="1">  4471  </CWMP:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <!-- the method element carries the version namespace -->
+    <CWMP:Inform>
+      <CWMP:DeviceID>
+        <CWMP:Manufacturer>ZTE</CWMP:Manufacturer>
+        <CWMP:OUI>0015EB</CWMP:OUI>
+        <CWMP:ProductClass>F670L</CWMP:ProductClass>
+        <CWMP:SerialNumber>ZTEGC8D1E2A3</CWMP:SerialNumber>
+      </CWMP:DeviceID>
+      <CWMP:EventList SOAP-ENC:arrayType="CWMP:EventStruct[1]">
+        <CWMP:EventStruct>
+          <CWMP:EventCode>1 BOOT</CWMP:EventCode>
+          <CWMP:CommandKey></CWMP:CommandKey>
+        </CWMP:EventStruct>
+      </CWMP:EventList>
+      <CWMP:MaxEnvelopes>1</CWMP:MaxEnvelopes>
+      <CWMP:CurrentTime>2024-06-01T00:00:01Z</CWMP:CurrentTime>
+      <CWMP:RetryCount>0</CWMP:RetryCount>
+      <CWMP:ParameterList SOAP-ENC:arrayType="CWMP:ParameterValueStruct[2]">
+        <CWMP:ParameterValueStruct>
+          <CWMP:Name>Device.DeviceInfo.UpTime</CWMP:Name>
+          <CWMP:Value XSI:type="XSD:unsignedInt">17</CWMP:Value>
+        </CWMP:ParameterValueStruct>
+        <!-- comments may appear between structs -->
+        <CWMP:ParameterValueStruct>
+          <CWMP:Name>Device.ManagementServer.ConnectionRequestURL</CWMP:Name>
+          <CWMP:Value XSI:type="XSD:string">http://192.0.2.10:7547/</CWMP:Value>
+        </CWMP:ParameterValueStruct>
+      </CWMP:ParameterList>
+    </CWMP:Inform>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>

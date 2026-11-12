@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap-env:Envelope xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soap-env:Header>
+    <cwmp:ID soap-env:mustUnderstand="1">20180411093012</cwmp:ID>
+  </soap-env:Header>
+  <soap-env:Body>
+    <cwmp:Inform>
+      <cwmp:DeviceID>
+        <cwmp:Manufacturer>Huawei Technologies Co., Ltd.</cwmp:Manufacturer>
+        <cwmp:OUI>00259E</cwmp:OUI>
+        <cwmp:ProductClass>HG8245H</cwmp:ProductClass>
+        <cwmp:SerialNumber>48575443A1B2C3D4</cwmp:SerialNumber>
+      </cwmp:DeviceID>
+      <cwmp:EventList soap-enc:arrayType="cwmp:EventStruct[2]">
+        <cwmp:EventStruct>
+          <cwmp:EventCode>0 BOOTSTRAP</cwmp:EventCode>
+          <cwmp:CommandKey></cwmp:CommandKey>
+        </cwmp:EventStruct>
+        <cwmp:EventStruct>
+          <cwmp:EventCode>1 BOOT</cwmp:EventCode>
+          <cwmp:CommandKey></cwmp:CommandKey>
+        </cwmp:EventStruct>
+      </cwmp:EventList>
+      <cwmp:MaxEnvelopes>1</cwmp:MaxEnvelopes>
+      <cwmp:CurrentTime>2024-03-11T09:12:44+00:00</cwmp:CurrentTime>
+      <cwmp:RetryCount>0</cwmp:RetryCount>
+      <cwmp:ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[25]">
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.DeviceInfo.Manufacturer</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">Huawei Technologies Co., Ltd.</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.DeviceInfo.ManufacturerOUI</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">00259E</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.DeviceInfo.ProductClass</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">HG8245H</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.DeviceInfo.SerialNumber</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">48575443A1B2C3D4</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.DeviceInfo.HardwareVersion</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">1D10.A</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.DeviceInfo.SoftwareVersion</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">V3R017C10S126</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.DeviceInfo.SpecVersion</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">1.0</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.DeviceInfo.ProvisioningCode</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string"></cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.ManagementServer.ConnectionRequestURL</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">http://10.12.34.56:7547/</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.ManagementServer.ParameterKey</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string"></cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.ManagementServer.Username</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">acs</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.ManagementServer.PeriodicInformEnable</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:boolean">1</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.ManagementServer.PeriodicInformInterval</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:unsignedInt">300</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.ManagementServer.PeriodicInformTime</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:dateTime"></cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.IP.Interface.1.Enable</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:boolean">1</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.IP.Interface.1.Status</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">Up</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.IP.Interface.1.IPv4Address.1.IPAddress</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">10.12.34.56</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">100.64.7.12</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Username</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">puser@isp.example</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ConnectionStatus</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">Connected</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.SSID.1.SSID</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">HOME-7F2A</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.1.Security.KeyPassphrase</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">secret &amp; more</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.Time.CurrentLocalTime</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:dateTime">2024-03-11T17:12:44+08:00</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.DeviceInfo.UpTime</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:unsignedInt">4212</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.DeviceInfo.MemoryStatus.Free</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:unsignedInt">38184</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+      </cwmp:ParameterList>
+    </cwmp:Inform>
+  </soap-env:Body>
+</soap-env:Envelope>

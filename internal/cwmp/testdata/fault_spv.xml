@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap-env:Envelope xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soap-env:Header>
+    <cwmp:ID soap-env:mustUnderstand="1">88124</cwmp:ID>
+  </soap-env:Header>
+  <soap-env:Body>
+    <soap-env:Fault>
+      <faultcode>soap-env:Client</faultcode>
+      <faultstring>CWMP fault</faultstring>
+      <detail>
+        <cwmp:Fault>
+          <cwmp:FaultCode>9003</cwmp:FaultCode>
+          <cwmp:FaultString>Invalid arguments</cwmp:FaultString>
+          <cwmp:SetParameterValuesFault>
+            <cwmp:ParameterName>Device.ManagementServer.PeriodicInformInterval</cwmp:ParameterName>
+            <cwmp:FaultCode>9007</cwmp:FaultCode>
+            <cwmp:FaultString>Invalid value</cwmp:FaultString>
+          </cwmp:SetParameterValuesFault>
+          <cwmp:SetParameterValuesFault>
+            <cwmp:ParameterName>Device.ManagementServer.Username</cwmp:ParameterName>
+            <cwmp:FaultCode>9006</cwmp:FaultCode>
+            <cwmp:FaultString>Invalid type</cwmp:FaultString>
+          </cwmp:SetParameterValuesFault>
+        </cwmp:Fault>
+      </detail>
+    </soap-env:Fault>
+  </soap-env:Body>
+</soap-env:Envelope>

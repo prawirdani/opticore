@@ -1,0 +1,812 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap-env:Envelope xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soap-env:Header>
+    <cwmp:ID soap-env:mustUnderstand="1">90001</cwmp:ID>
+  </soap-env:Header>
+  <soap-env:Body>
+    <cwmp:GetParameterValuesResponse>
+      <cwmp:ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[200]" xsi:type="soap-enc:Array">
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.0.AssociatedDevice.0.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-40</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.1.AssociatedDevice.1.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-41</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.2.AssociatedDevice.2.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-42</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.3.AssociatedDevice.3.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-43</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.4.AssociatedDevice.4.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-44</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.5.AssociatedDevice.5.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-45</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.6.AssociatedDevice.6.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-46</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.7.AssociatedDevice.7.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-47</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.8.AssociatedDevice.8.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-48</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.9.AssociatedDevice.9.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-49</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.1.Security.KeyPassphrase</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">p&amp;ss&lt;word&gt;</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.11.AssociatedDevice.11.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-51</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.12.AssociatedDevice.12.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-52</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.13.AssociatedDevice.13.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-53</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.14.AssociatedDevice.14.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-54</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.15.AssociatedDevice.15.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-55</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.16.AssociatedDevice.16.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-56</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.17.AssociatedDevice.17.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-57</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.18.AssociatedDevice.18.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-58</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.19.AssociatedDevice.19.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-59</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.20.AssociatedDevice.20.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-60</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.21.AssociatedDevice.21.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-61</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.22.AssociatedDevice.22.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-62</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.23.AssociatedDevice.23.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-63</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.24.AssociatedDevice.24.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-64</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.25.AssociatedDevice.25.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-65</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.26.AssociatedDevice.26.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-66</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.27.AssociatedDevice.27.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-67</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.28.AssociatedDevice.28.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-68</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.29.AssociatedDevice.29.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-69</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.30.AssociatedDevice.30.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-70</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.31.AssociatedDevice.31.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-71</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.32.AssociatedDevice.32.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-72</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.33.AssociatedDevice.33.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-73</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.34.AssociatedDevice.34.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-74</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.35.AssociatedDevice.35.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-75</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.36.AssociatedDevice.36.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-76</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.37.AssociatedDevice.37.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-77</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.38.AssociatedDevice.38.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-78</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.39.AssociatedDevice.39.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-79</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.40.AssociatedDevice.40.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-40</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.41.AssociatedDevice.41.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-41</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.42.AssociatedDevice.42.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-42</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.43.AssociatedDevice.43.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-43</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.44.AssociatedDevice.44.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-44</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.45.AssociatedDevice.45.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-45</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.46.AssociatedDevice.46.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-46</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.47.AssociatedDevice.47.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-47</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.48.AssociatedDevice.48.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-48</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.49.AssociatedDevice.49.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-49</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Name</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">WAN &amp; IP</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.51.AssociatedDevice.51.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-51</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.52.AssociatedDevice.52.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-52</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.53.AssociatedDevice.53.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-53</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.54.AssociatedDevice.54.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-54</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.55.AssociatedDevice.55.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-55</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.56.AssociatedDevice.56.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-56</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.57.AssociatedDevice.57.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-57</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.58.AssociatedDevice.58.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-58</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.59.AssociatedDevice.59.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-59</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.60.AssociatedDevice.60.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-60</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.61.AssociatedDevice.61.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-61</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.62.AssociatedDevice.62.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-62</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.63.AssociatedDevice.63.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-63</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.64.AssociatedDevice.64.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-64</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.65.AssociatedDevice.65.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-65</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.66.AssociatedDevice.66.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-66</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.67.AssociatedDevice.67.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-67</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.68.AssociatedDevice.68.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-68</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.69.AssociatedDevice.69.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-69</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.70.AssociatedDevice.70.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-70</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.71.AssociatedDevice.71.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-71</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.72.AssociatedDevice.72.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-72</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.73.AssociatedDevice.73.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-73</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.74.AssociatedDevice.74.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-74</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.75.AssociatedDevice.75.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-75</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.76.AssociatedDevice.76.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-76</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.77.AssociatedDevice.77.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-77</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.78.AssociatedDevice.78.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-78</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.79.AssociatedDevice.79.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-79</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.80.AssociatedDevice.80.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-40</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.81.AssociatedDevice.81.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-41</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.82.AssociatedDevice.82.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-42</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.83.AssociatedDevice.83.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-43</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.84.AssociatedDevice.84.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-44</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.85.AssociatedDevice.85.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-45</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.86.AssociatedDevice.86.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-46</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.87.AssociatedDevice.87.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-47</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.88.AssociatedDevice.88.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-48</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.89.AssociatedDevice.89.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-49</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.90.AssociatedDevice.90.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-50</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.91.AssociatedDevice.91.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-51</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.92.AssociatedDevice.92.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-52</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.93.AssociatedDevice.93.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-53</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.94.AssociatedDevice.94.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-54</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.95.AssociatedDevice.95.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-55</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.96.AssociatedDevice.96.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-56</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.97.AssociatedDevice.97.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-57</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.98.AssociatedDevice.98.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-58</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.99.AssociatedDevice.99.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-59</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.100.AssociatedDevice.100.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-60</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.101.AssociatedDevice.101.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-61</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.102.AssociatedDevice.102.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-62</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.103.AssociatedDevice.103.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-63</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.104.AssociatedDevice.104.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-64</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.105.AssociatedDevice.105.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-65</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.106.AssociatedDevice.106.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-66</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.107.AssociatedDevice.107.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-67</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.108.AssociatedDevice.108.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-68</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.109.AssociatedDevice.109.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-69</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.110.AssociatedDevice.110.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-70</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.111.AssociatedDevice.111.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-71</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.112.AssociatedDevice.112.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-72</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.113.AssociatedDevice.113.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-73</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.114.AssociatedDevice.114.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-74</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.115.AssociatedDevice.115.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-75</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.116.AssociatedDevice.116.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-76</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.117.AssociatedDevice.117.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-77</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.118.AssociatedDevice.118.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-78</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.119.AssociatedDevice.119.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-79</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.DeviceInfo.Description</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string">Rate: &#36;5 &lt; 10 &#x41;</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.121.AssociatedDevice.121.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-41</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.122.AssociatedDevice.122.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-42</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.123.AssociatedDevice.123.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-43</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.124.AssociatedDevice.124.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-44</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.125.AssociatedDevice.125.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-45</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.126.AssociatedDevice.126.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-46</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.127.AssociatedDevice.127.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-47</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.128.AssociatedDevice.128.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-48</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.129.AssociatedDevice.129.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-49</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.130.AssociatedDevice.130.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-50</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.131.AssociatedDevice.131.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-51</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.132.AssociatedDevice.132.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-52</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.133.AssociatedDevice.133.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-53</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.134.AssociatedDevice.134.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-54</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.135.AssociatedDevice.135.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-55</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.136.AssociatedDevice.136.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-56</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.137.AssociatedDevice.137.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-57</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.138.AssociatedDevice.138.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-58</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.139.AssociatedDevice.139.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-59</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.140.AssociatedDevice.140.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-60</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.141.AssociatedDevice.141.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-61</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.142.AssociatedDevice.142.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-62</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.143.AssociatedDevice.143.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-63</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.144.AssociatedDevice.144.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-64</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.145.AssociatedDevice.145.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-65</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.146.AssociatedDevice.146.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-66</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.147.AssociatedDevice.147.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-67</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.148.AssociatedDevice.148.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-68</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.149.AssociatedDevice.149.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-69</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.SSID.1.SSID</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:string"><![CDATA[CDATA & value]]></cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.151.AssociatedDevice.151.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-71</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.152.AssociatedDevice.152.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-72</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.153.AssociatedDevice.153.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-73</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.154.AssociatedDevice.154.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-74</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.155.AssociatedDevice.155.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-75</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.156.AssociatedDevice.156.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-76</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.157.AssociatedDevice.157.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-77</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.158.AssociatedDevice.158.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-78</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.159.AssociatedDevice.159.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-79</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.160.AssociatedDevice.160.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-40</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.161.AssociatedDevice.161.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-41</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.162.AssociatedDevice.162.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-42</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.163.AssociatedDevice.163.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-43</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.164.AssociatedDevice.164.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-44</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.165.AssociatedDevice.165.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-45</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.166.AssociatedDevice.166.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-46</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.167.AssociatedDevice.167.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-47</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.168.AssociatedDevice.168.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-48</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.169.AssociatedDevice.169.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-49</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.170.AssociatedDevice.170.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-50</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.171.AssociatedDevice.171.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-51</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.172.AssociatedDevice.172.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-52</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.173.AssociatedDevice.173.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-53</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.174.AssociatedDevice.174.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-54</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.175.AssociatedDevice.175.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-55</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.176.AssociatedDevice.176.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-56</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.177.AssociatedDevice.177.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-57</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.178.AssociatedDevice.178.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-58</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.179.AssociatedDevice.179.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-59</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.180.AssociatedDevice.180.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-60</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.181.AssociatedDevice.181.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-61</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.182.AssociatedDevice.182.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-62</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.183.AssociatedDevice.183.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-63</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.184.AssociatedDevice.184.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-64</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.185.AssociatedDevice.185.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-65</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.186.AssociatedDevice.186.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-66</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.187.AssociatedDevice.187.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-67</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.188.AssociatedDevice.188.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-68</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.189.AssociatedDevice.189.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-69</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.190.AssociatedDevice.190.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-70</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.191.AssociatedDevice.191.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-71</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.192.AssociatedDevice.192.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-72</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.193.AssociatedDevice.193.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-73</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.194.AssociatedDevice.194.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-74</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.195.AssociatedDevice.195.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-75</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.196.AssociatedDevice.196.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-76</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.197.AssociatedDevice.197.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-77</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.198.AssociatedDevice.198.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-78</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+        <cwmp:ParameterValueStruct>
+          <cwmp:Name>Device.WiFi.AccessPoint.199.AssociatedDevice.199.SignalStrength</cwmp:Name>
+          <cwmp:Value xsi:type="xsd:int">-79</cwmp:Value>
+        </cwmp:ParameterValueStruct>
+      </cwmp:ParameterList>
+    </cwmp:GetParameterValuesResponse>
+  </soap-env:Body>
+</soap-env:Envelope>
