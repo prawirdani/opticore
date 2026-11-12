@@ -1006,6 +1006,14 @@ Authorization: Bearer {OPTICORE_HOOK_SECRET}
 
 ## Appendix C — first week
 
+Local development: `make dev` runs the daemon under
+[air](https://github.com/air-verse/air) with hot reload, reading `.env`;
+`make serve` runs it once, `make build` writes `bin/opticore`, `make migrate`
+applies migrations, `make test` runs unit tests, and `make itest` adds the
+PostgreSQL integration tests (`OPTICORE_TEST_DSN`, a separate database because
+advisory locks are per database). `make help` lists them.
+
+
 1. `go mod init`, layout, `cmd/opticore`, `internal/config` (environment
    loading and validation), advisory lock, `healthz`.
 2. Migrations: the spike needs devices, tasks, events; jobs, firmware and

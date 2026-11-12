@@ -1,0 +1,38 @@
+# air: rebuild and restart the daemon on save.
+# Env comes from .env, injected by `make dev` (air does not read .env itself).
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/opticore ./cmd/opticore"
+  bin = "./tmp/opticore"
+  args_bin = ["serve"]
+  delay = 300
+  stop_on_error = true
+  send_interrupt = true
+  kill_delay = "2s"
+
+[log]
+  time = true
+  main_only = false
+
+[color]
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"
+
+[misc]
+  clean_on_exit = true
+
+[screen]
+  clear_on_rebuild = false
+  keep_scroll = true
+
+[[watch]]
+  include_dir = ["cmd", "internal", "migrations"]
+  include_ext = ["go", "sql"]
+  exclude_dir = ["tmp", "bin", ".git"]
+  exclude_regex = ["_test\\.go"]
+  exclude_unchanged = true
