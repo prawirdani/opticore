@@ -25,13 +25,13 @@ type Config struct {
 	CWMPMaxBody        int64
 	CWMPMaxSessions    int
 
-	APIAddr     string
-	FileAddr    string
+	APIAddr  string
+	FileAddr string
 
 	// API security.
 	APIInsecureLocal bool // accept unauthenticated /v1 on loopback only
 	APIRequireReveal bool // ?reveal=1 needs a token with the reveal scope
-	FirmwareDir string
+	FirmwareDir      string
 
 	HookURL         string
 	HookSecret      string
