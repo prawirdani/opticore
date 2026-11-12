@@ -1,0 +1,5 @@
+/opticore
+/bin/
+*.test
+*.out
+.env
