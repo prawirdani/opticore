@@ -3,6 +3,7 @@ package acs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,7 +21,9 @@ import (
 
 	"github.com/prawirdani/opticore/internal/config"
 	"github.com/prawirdani/opticore/internal/cwmp"
+	"github.com/prawirdani/opticore/internal/hook"
 	"github.com/prawirdani/opticore/internal/store"
+	"github.com/prawirdani/opticore/internal/wake"
 )
 
 var (
@@ -94,11 +97,19 @@ type harness struct {
 	sess *fakeCPE
 }
 
+type harnessOpt func(*harness, *Sessions)
+
 func newHarness(t *testing.T, configure func(*fakeCPE)) *harness {
+	return newHarnessWith(t, configure)
+}
+
+func newHarnessWith(t *testing.T, configure func(*fakeCPE), opts ...harnessOpt) *harness {
 	t.Helper()
 	st := testStore(t)
+	sessions := &Sessions{Store: st, Key: testKey,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), GPVBatch: 32, MaxAttempts: 2}
 	cs := &cwmp.Server{
-		Handler: &Sessions{Store: st, Key: testKey, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), GPVBatch: 32, MaxAttempts: 2},
+		Handler: sessions,
 		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		MaxBody: 10 << 20, SessionTimeout: 5 * time.Second, MaxSessions: 10,
 	}
@@ -114,7 +125,12 @@ func newHarness(t *testing.T, configure func(*fakeCPE)) *harness {
 	if configure != nil {
 		configure(f)
 	}
-	return &harness{t: t, acs: srv, svc: &Service{Store: st, Key: testKey}, st: st, cpe: f.client, sess: f}
+	h := &harness{t: t, acs: srv, svc: &Service{Store: st, Key: testKey}, st: st, cpe: f.client, sess: f}
+	sessions.Svc = h.svc
+	for _, o := range opts {
+		o(h, sessions)
+	}
+	return h
 }
 
 // fakeCPE answers ACS requests from canned tables and records what it saw.
@@ -588,5 +604,166 @@ func TestCloseMarksNonIdempotentInflightUnknown(t *testing.T) {
 	}
 	if unknown != 1 || cancelled != 1 {
 		t.Fatalf("unknown=%d cancelled=%d done=%d, want 1/1/0: %+v", unknown, cancelled, done, ts)
+	}
+}
+
+// A provisioner runs inside the bootstrapping session: prefetch, step 1 with
+// tasks, execution, step 2 with results, then the session ends. No wake, no
+// second session.
+func TestHookProvisionerRunsInSession(t *testing.T) {
+	var steps []hook.Step
+	prov := httptest.NewServer(hook.Handler("k", func(_ context.Context, s hook.Step) ([]hook.Task, error) {
+		steps = append(steps, s)
+		switch s.Step {
+		case 1:
+			return []hook.Task{
+				{Name: "add_object", Args: json.RawMessage(`{"path":"InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection."}`)},
+				{Name: "set", Args: json.RawMessage(`{"values":[["InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.{instance}.Username","s0004@isp","xsd:string"]]}`)},
+			}, nil
+		default:
+			return nil, nil
+		}
+	}))
+	defer prov.Close()
+
+	h := newHarnessWith(t, func(f *fakeCPE) {
+		f.params = map[string]string{"InternetGatewayDevice.ManagementServer.PeriodicInformInterval": "300"}
+	}, func(_ *harness, s *Sessions) {
+		c, err := hook.New(prov.URL, "k", 2*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.Hook = c
+		s.HookEvents = []string{"0 BOOTSTRAP"}
+		s.HookPrefetch = []string{"InternetGatewayDevice.ManagementServer.PeriodicInformInterval"}
+		s.HookTimeout = 10 * time.Second
+	})
+	h.sess.inform("48575443BD7589AB", []string{"0 BOOTSTRAP", "1 BOOT"})
+	if n := h.sess.run(); n != 5 { // CR set, prefetch, add_object, GPV prev, SPV
+		t.Fatalf("answered %d ACS requests, want 5", n)
+	}
+
+	if len(steps) != 2 {
+		t.Fatalf("provisioner saw %d steps, want 2", len(steps))
+	}
+	if steps[0].Device.Serial != "48575443BD7589AB" || steps[0].Device.ProductClass != "HG8145V5" {
+		t.Errorf("step 1 device = %+v", steps[0].Device)
+	}
+	if steps[0].Prefetch["InternetGatewayDevice.ManagementServer.PeriodicInformInterval"].Value != "300" {
+		t.Errorf("prefetch = %+v", steps[0].Prefetch)
+	}
+	if len(steps[1].Results) != 2 || steps[1].Results[0].Status != "done" {
+		t.Fatalf("step 2 results = %+v", steps[1].Results)
+	}
+	if got := string(steps[1].Results[0].Result); !strings.Contains(got, "instance") {
+		t.Errorf("add_object result = %s", got)
+	}
+	// The set used the instance number from add_object.
+	sets := h.sess.taskSets()
+	if len(sets) != 1 || !strings.Contains(sets[0][0][0], "WANPPPConnection.3.Username") {
+		t.Fatalf("sets = %v", sets)
+	}
+	ts, _ := h.st.ListTasks(context.Background(), "48575443BD7589AB", 10)
+	for _, x := range ts {
+		if x.Status != "done" {
+			t.Errorf("task %d %s = %s (%s)", x.ID, x.Name, x.Status, x.Fault)
+		}
+	}
+}
+
+// A hook that fails must not break the session: CR credentials still apply,
+// queued API tasks still run, and the inform is stored.
+func TestHookFailureFallsBack(t *testing.T) {
+	prov := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer prov.Close()
+
+	h := newHarnessWith(t, nil, func(_ *harness, s *Sessions) {
+		c, err := hook.New(prov.URL, "k", 2*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.Hook = c
+		s.HookEvents = []string{"0 BOOTSTRAP"}
+	})
+	// Bootstrap: the hook fails, CR credentials and the session still work.
+	h.sess.inform("48575443BD7589AB", []string{"0 BOOTSTRAP", "1 BOOT"})
+	if n := h.sess.run(); n != 1 { // CR set only
+		t.Fatalf("answered %d ACS requests, want 1", n)
+	}
+	// Queued API tasks still run on the next session.
+	if _, err := h.svc.Enqueue(context.Background(), "48575443BD7589AB", []store.NewTask{{
+		Name: "get", Args: json.RawMessage(`{"paths":["InternetGatewayDevice.DeviceInfo.UpTime"]}`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	h.sess.params = map[string]string{"InternetGatewayDevice.DeviceInfo.UpTime": "42"}
+	h.sess.inform("48575443BD7589AB", []string{"2 PERIODIC"})
+	h.sess.run()
+	ts, _ := h.st.ListTasks(context.Background(), "48575443BD7589AB", 10)
+	if len(ts) != 1 || ts[0].Status != "done" {
+		t.Fatalf("queued task after a failed hook = %+v", ts)
+	}
+
+	d, err := h.st.GetDevice(context.Background(), "48575443BD7589AB")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.CRSetAt == nil {
+		t.Error("CR credentials were not set after the hook failed")
+	}
+}
+
+// Only events on the trigger list start the hook.
+func TestHookNotCalledWithoutTriggerEvent(t *testing.T) {
+	calls := 0
+	prov := httptest.NewServer(hook.Handler("k", func(context.Context, hook.Step) ([]hook.Task, error) {
+		calls++
+		return nil, nil
+	}))
+	defer prov.Close()
+
+	h := newHarnessWith(t, nil, func(_ *harness, s *Sessions) {
+		c, _ := hook.New(prov.URL, "k", time.Second)
+		s.Hook = c
+		s.HookEvents = []string{"0 BOOTSTRAP"}
+	})
+	h.sess.inform("48575443BD7589AB", []string{"2 PERIODIC"})
+	h.sess.run()
+	if calls != 0 {
+		t.Errorf("provisioner called %d times on a periodic inform", calls)
+	}
+}
+
+// A device that refuses our connection-request credentials (factory reset, or a
+// reboot that restored older settings) must not stay unreachable: the stored
+// credentials are dropped so the next Inform sets them again.
+func TestWakeUnauthorizedClearsCredentials(t *testing.T) {
+	h := newHarness(t, nil)
+	ctx := context.Background()
+	h.sess.inform("48575443BD7589AB", []string{"0 BOOTSTRAP"})
+	h.sess.run()
+
+	d, err := h.st.GetDevice(ctx, "48575443BD7589AB")
+	if err != nil || d.CRSetAt == nil {
+		t.Fatalf("setup: %+v %v", d, err)
+	}
+	deny := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Digest realm="x", nonce="n", qop="auth", algorithm="MD5"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer deny.Close()
+
+	if _, err := h.st.Pool().Exec(ctx, `UPDATE devices SET cr_url = $2 WHERE id = $1`, d.ID, deny.URL); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{Store: h.st, Key: testKey, Waker: wake.New(time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))}
+	if err := svc.Wake(ctx, "48575443BD7589AB"); !errors.Is(err, wake.ErrUnauthorized) {
+		t.Fatalf("err = %v, want ErrUnauthorized", err)
+	}
+	d, _ = h.st.GetDevice(ctx, "48575443BD7589AB")
+	if d.CRSetAt != nil || d.CRUsername != "" || d.CRPassword != "" {
+		t.Errorf("credentials kept after a refused wake: %+v", d)
 	}
 }

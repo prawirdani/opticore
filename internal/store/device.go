@@ -240,3 +240,19 @@ func (s *Store) SetPendingReboot(ctx context.Context, deviceID string, pending b
 	}
 	return nil
 }
+
+// ClearCRCredentials forgets the connection-request credentials, so the next
+// Inform sets them again. Used when a wake is refused: the device clearly does
+// not hold what we think it does.
+func (s *Store) ClearCRCredentials(ctx context.Context, deviceID string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE devices
+		SET cr_username = '', cr_password = '', cr_set_at = NULL
+		WHERE id = $1`, deviceID)
+	if err != nil {
+		return fmt.Errorf("store: clear cr credentials: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrDeviceNotFound
+	}
+	return nil
+}

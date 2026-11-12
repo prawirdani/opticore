@@ -14,16 +14,23 @@ import (
 	"time"
 
 	"github.com/prawirdani/opticore/internal/cwmp"
+	"github.com/prawirdani/opticore/internal/hook"
 	"github.com/prawirdani/opticore/internal/store"
 )
 
 // Sessions implements cwmp.Handler on top of the task queue.
 type Sessions struct {
 	Store       *store.Store
+	Svc         *Service // used to create hook tasks through the same validator
 	Key         []byte
 	Logger      *slog.Logger
 	GPVBatch    int // exact names per GetParameterValues
 	MaxAttempts int
+
+	Hook         *hook.Client // nil: no hook
+	HookEvents   []string
+	HookPrefetch []string
+	HookTimeout  time.Duration
 }
 
 // state is the per-session data kept in cwmp.Session.Data.
@@ -37,6 +44,13 @@ type state struct {
 	crUser   string
 	crPass   string
 
+	events       []string
+	informParams map[string]hook.Param
+
+	// hook drives the operator provisioner inside this session (§7).
+	hook     *hookState
+	apiQueue []store.Task // tasks that were queued before the hook
+
 	stop     bool // end this session (retryable fault: retry on the next wake)
 	cur      *store.Task
 	steps    []cwmp.Request // remaining RPCs of cur
@@ -46,8 +60,22 @@ type state struct {
 }
 
 type tag struct {
-	kind string // "cr", "task"
-	step string // "prev", "get", "set", "obj", "reboot", "reset"
+	kind string // "cr", "task", "hook"
+	step string // "prev", "get", "set", "obj", "reboot", "reset", "prefetch"
+}
+
+// hookState is the step loop with the operator provisioner.
+type hookState struct {
+	started    time.Time
+	step       int
+	state      string
+	prefetch   []string
+	prefetched bool
+	values     map[string]hook.Param // prefetched values
+	running    bool                  // a hook batch is being executed
+	done       bool                  // the provisioner said stop, or it failed
+	ids        map[int64]bool        // task rows created by the hook
+	results    []hook.Result
 }
 
 func (h *Sessions) st(s *cwmp.Session) *state { return s.Data.(*state) }
@@ -96,14 +124,29 @@ func (h *Sessions) Inform(ctx context.Context, s *cwmp.Session, in *cwmp.Inform)
 	if err != nil {
 		return err
 	}
-	s.Data = &state{
+	st := &state{
 		dev:      dev,
 		root:     root,
 		queue:    tasks,
 		crWanted: root != "" && (bootstrap || dev.CRSetAt == nil || dev.CRPassword == ""),
 		instance: map[string]int{},
 		dead:     map[string]bool{},
+		events:   rec.Events,
 	}
+	if h.Hook != nil && hook.Matches(rec.Events, h.HookEvents) {
+		st.apiQueue, st.queue = tasks, nil
+		st.hook = &hookState{
+			started:  time.Now(),
+			prefetch: h.HookPrefetch,
+			values:   map[string]hook.Param{},
+			ids:      map[int64]bool{},
+		}
+		st.informParams = make(map[string]hook.Param, len(in.Params))
+		for _, p := range in.Params {
+			st.informParams[p.Name] = hook.Param{Value: p.Value, Type: p.Type}
+		}
+	}
+	s.Data = st
 	h.Logger.Info("inform", "device_id", s.DeviceID, "events", rec.Events,
 		"retry", in.RetryCount, "pending_tasks", len(tasks), "version", s.Version)
 	return nil
@@ -134,12 +177,29 @@ func (h *Sessions) Next(ctx context.Context, s *cwmp.Session) (cwmp.Request, boo
 		}, true, nil
 	}
 	for {
+		// The provisioner runs before the queued API tasks (§7).
+		if st.hook != nil && !st.hook.done && !st.hook.running && len(st.steps) == 0 {
+			req, ok, err := h.hookNext(ctx, s, st)
+			if err != nil {
+				return cwmp.Request{}, false, err
+			}
+			if ok {
+				return req, true, nil
+			}
+		}
 		if len(st.steps) > 0 {
 			req := st.steps[0]
 			st.steps = st.steps[1:]
 			return req, true, nil
 		}
 		if len(st.queue) == 0 {
+			if st.hook != nil && st.hook.running {
+				st.hook.running = false // hook batch drained; ask the provisioner again
+				continue
+			}
+			if st.hook != nil && !st.hook.done {
+				continue // hookNext runs on the next iteration
+			}
 			if st.reloaded {
 				return cwmp.Request{}, false, nil
 			}
@@ -148,7 +208,8 @@ func (h *Sessions) Next(ctx context.Context, s *cwmp.Session) (cwmp.Request, boo
 			if err != nil {
 				return cwmp.Request{}, false, err
 			}
-			st.queue = tasks
+			st.queue = append(st.apiQueue, tasks...)
+			st.apiQueue = nil
 			continue
 		}
 		t := st.queue[0]
@@ -171,6 +232,89 @@ func (h *Sessions) Next(ctx context.Context, s *cwmp.Session) (cwmp.Request, boo
 		}
 		st.cur, st.steps, st.prev = &t, steps, nil
 	}
+}
+
+// maxHookSteps bounds the step loop so a provisioner cannot keep a session
+// open forever, on top of HookTimeout.
+const maxHookSteps = 8
+
+// hookNext performs the prefetch, then one provisioner step, and queues the
+// tasks it returns. ok is false when there is nothing to send, in which case
+// the caller continues with the queue.
+func (h *Sessions) hookNext(ctx context.Context, s *cwmp.Session, st *state) (cwmp.Request, bool, error) {
+	hk := st.hook
+	if h.HookTimeout > 0 && time.Since(hk.started) > h.HookTimeout {
+		h.endHook(s, hk, "hook timeout")
+		return cwmp.Request{}, false, nil
+	}
+	if len(hk.prefetch) > 0 && !hk.prefetched {
+		hk.prefetched = true
+		return cwmp.Request{
+			Kind:  cwmp.ReqGetParameterValues,
+			Names: hk.prefetch,
+			Tag:   tag{kind: "hook", step: "prefetch"},
+		}, true, nil
+	}
+	if hk.step >= maxHookSteps {
+		h.endHook(s, hk, "step limit reached")
+		return cwmp.Request{}, false, nil
+	}
+	hk.step++
+	reply, err := h.Hook.Step(ctx, hook.Step{
+		Step: hk.step,
+		Device: hook.Device{
+			ID: s.DeviceID, Serial: st.dev.Serial, OUI: st.dev.OUI,
+			ProductClass: st.dev.ProductClass, SoftwareVersion: st.dev.SoftwareVersion,
+		},
+		Events:   st.events,
+		Params:   st.informParams,
+		Prefetch: hk.values,
+		Results:  hk.results,
+		State:    hk.state,
+	})
+	if err != nil {
+		// The hook failed: the session continues and SSE still publishes the
+		// Inform, so an external client can react (§7).
+		h.Logger.Warn("hook failed; continuing without it", "device_id", s.DeviceID, "step", hk.step, "err", err)
+		h.endHook(s, hk, "hook call failed")
+		return cwmp.Request{}, false, nil
+	}
+	hk.results = nil
+	hk.state = reply.State
+	if len(reply.Tasks) == 0 {
+		h.endHook(s, hk, "provisioner finished")
+		return cwmp.Request{}, false, nil
+	}
+	if h.Svc == nil {
+		h.endHook(s, hk, "no task service configured")
+		return cwmp.Request{}, false, nil
+	}
+	tasks := make([]store.NewTask, 0, len(reply.Tasks))
+	for _, t := range reply.Tasks {
+		tasks = append(tasks, store.NewTask{Name: t.Name, Args: t.Args})
+	}
+	created, err := h.Svc.CreateTasks(ctx, s.DeviceID, tasks)
+	if err != nil {
+		h.Logger.Warn("hook tasks rejected", "device_id", s.DeviceID, "step", hk.step, "err", err)
+		h.endHook(s, hk, "invalid hook tasks")
+		return cwmp.Request{}, false, nil
+	}
+	for _, t := range created {
+		hk.ids[t.ID] = true
+	}
+	st.queue = append(st.queue, created...)
+	hk.running = true
+	return cwmp.Request{}, false, nil
+}
+
+// endHook closes the step loop and records why, for the log and the device row.
+func (h *Sessions) endHook(s *cwmp.Session, hk *hookState, why string) {
+	if hk.done {
+		return
+	}
+	hk.done = true
+	hk.running = false
+	h.Logger.Info("hook ended", "device_id", s.DeviceID, "steps", hk.step, "why", why)
 }
 
 // plan turns a task into its RPC steps.
@@ -278,6 +422,16 @@ func (h *Sessions) Response(ctx context.Context, s *cwmp.Session, req cwmp.Reque
 		return h.Store.SetCRCredentials(ctx, s.DeviceID, st.crUser, enc)
 	}
 
+	if tg.kind == "hook" {
+		now := time.Now().UTC()
+		cache := map[string]store.Param{}
+		for _, p := range m.GetParameterValuesResponse.Params {
+			st.hook.values[p.Name] = hook.Param{Value: p.Value, Type: p.Type}
+			cache[p.Name] = store.Param{Value: p.Value, Type: p.Type, UpdatedAt: &now}
+		}
+		return h.Store.MergeParams(ctx, s.DeviceID, cache)
+	}
+
 	t := st.cur
 	if t == nil {
 		return nil
@@ -351,8 +505,14 @@ func (h *Sessions) Response(ctx context.Context, s *cwmp.Session, req cwmp.Reque
 }
 
 func (h *Sessions) done(ctx context.Context, s *cwmp.Session, t *store.Task, result map[string]any) error {
-	h.st(s).cur = nil
+	st := h.st(s)
+	st.cur = nil
 	b, _ := json.Marshal(result)
+	if st.hook != nil && st.hook.ids[t.ID] {
+		st.hook.results = append(st.hook.results, hook.Result{
+			Name: t.Name, Status: "done", Result: b,
+		})
+	}
 	h.Logger.Info("task done", "device_id", s.DeviceID, "task", t.ID, "name", t.Name)
 	return h.Store.FinishTask(ctx, t.ID, "done", b, nil, "")
 }
@@ -373,6 +533,15 @@ func (h *Sessions) fault(ctx context.Context, s *cwmp.Session, t *store.Task, f 
 }
 
 func (h *Sessions) fail(ctx context.Context, s *cwmp.Session, t *store.Task, code int, msg string) error {
+	if st := h.st(s); st.hook != nil && st.hook.ids[t.ID] {
+		var fc *int
+		if code != 0 {
+			fc = &code
+		}
+		st.hook.results = append(st.hook.results, hook.Result{
+			Name: t.Name, Status: "failed", FaultCode: fc, Fault: msg,
+		})
+	}
 	h.Logger.Warn("task failed", "device_id", s.DeviceID, "task", t.ID, "name", t.Name, "fault_code", code, "fault", msg)
 	var fc *int
 	if code != 0 {

@@ -21,6 +21,7 @@ import (
 	"github.com/prawirdani/opticore/internal/api"
 	"github.com/prawirdani/opticore/internal/config"
 	"github.com/prawirdani/opticore/internal/cwmp"
+	"github.com/prawirdani/opticore/internal/hook"
 	"github.com/prawirdani/opticore/internal/store"
 	"github.com/prawirdani/opticore/internal/wake"
 )
@@ -103,11 +104,23 @@ func serve(ctx context.Context) error {
 		return err
 	}
 
+	svc := &acs.Service{Store: st, Key: cfg.SecretKey, Waker: wake.New(cfg.CWMPCRTimeout, log), Logger: log}
+	sessions := &acs.Sessions{
+		Store: st, Svc: svc, Key: cfg.SecretKey, Logger: log,
+		GPVBatch: cfg.CWMPGPVBatch, MaxAttempts: cfg.TaskMaxAttempts,
+		HookEvents: cfg.HookEvents, HookPrefetch: cfg.HookPrefetch, HookTimeout: cfg.HookTimeout,
+	}
+	if cfg.HookURL != "" {
+		hc, err := hook.New(cfg.HookURL, cfg.HookSecret, cfg.HookStepTimeout)
+		if err != nil {
+			return err
+		}
+		sessions.Hook = hc
+		log.Info("inform hook configured", "url", cfg.HookURL, "events", cfg.HookEvents,
+			"step_timeout", cfg.HookStepTimeout, "timeout", cfg.HookTimeout)
+	}
 	cs := &cwmp.Server{
-		Handler: &acs.Sessions{
-			Store: st, Key: cfg.SecretKey, Logger: log,
-			GPVBatch: cfg.CWMPGPVBatch, MaxAttempts: cfg.TaskMaxAttempts,
-		},
+		Handler:        sessions,
 		Logger:         log,
 		MaxBody:        cfg.CWMPMaxBody,
 		SessionTimeout: cfg.CWMPSessionTimeout,
@@ -116,7 +129,6 @@ func serve(ctx context.Context) error {
 	cs.Start()
 	defer cs.Stop()
 
-	svc := &acs.Service{Store: st, Key: cfg.SecretKey, Waker: wake.New(cfg.CWMPCRTimeout, log), Logger: log}
 	cwmpMux := http.NewServeMux()
 	cwmpMux.Handle("/", cs)
 	cwmpMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

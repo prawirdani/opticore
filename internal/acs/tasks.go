@@ -47,15 +47,20 @@ type Service struct {
 // which Opticore owns (§5).
 var ErrReservedPath = errors.New("connection-request credentials are managed by the ACS")
 
-// Enqueue validates, seals secret values and stores tasks; more than one task
-// forms an ordered batch. It then wakes the device when anything is due now.
-func (svc *Service) Enqueue(ctx context.Context, idOrSerial string, tasks []store.NewTask) ([]store.Task, error) {
+// CreateTasks validates, seals secret values and stores tasks; more than one
+// task forms an ordered batch. It does not wake the device.
+func (svc *Service) CreateTasks(ctx context.Context, idOrSerial string, tasks []store.NewTask) ([]store.Task, error) {
 	for i := range tasks {
 		if err := svc.prepare(&tasks[i]); err != nil {
 			return nil, fmt.Errorf("task %d (%s): %w", i+1, tasks[i].Name, err)
 		}
 	}
-	out, err := svc.Store.CreateTasks(ctx, idOrSerial, tasks)
+	return svc.Store.CreateTasks(ctx, idOrSerial, tasks)
+}
+
+// Enqueue stores tasks and wakes the device when anything is due now.
+func (svc *Service) Enqueue(ctx context.Context, idOrSerial string, tasks []store.NewTask) ([]store.Task, error) {
+	out, err := svc.CreateTasks(ctx, idOrSerial, tasks)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +141,16 @@ func (svc *Service) Wake(ctx context.Context, idOrSerial string) error {
 	if err != nil {
 		return err
 	}
-	return svc.Waker.Wake(ctx, t)
+	err = svc.Waker.Wake(ctx, t)
+	if errors.Is(err, wake.ErrUnauthorized) {
+		// The device refused the credentials we believe it holds (it was
+		// factory reset, or a reboot restored older settings). Forget them so
+		// the next Inform sets them again.
+		if cerr := svc.Store.ClearCRCredentials(ctx, t.DeviceID); cerr == nil {
+			svc.warn("wake refused: connection-request credentials will be re-set on the next inform", t.DeviceID, err)
+		}
+	}
+	return err
 }
 
 func (svc *Service) wakeTarget(ctx context.Context, idOrSerial string) (wake.Target, error) {
