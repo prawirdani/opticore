@@ -190,11 +190,17 @@ These are the ones that break naive implementations:
   row. Changes made by the ACS itself do **not** raise `4 VALUE CHANGE`, so
   never wait for that event. Opticore sends a `ParameterKey` of the task id with
   every set; it is a readable marker of the last applied set, nothing more.
-- **Value-change informs.** `4 VALUE CHANGE` reports changes made by someone
-  other than the ACS (local web UI, the subscriber). It arrives only for
-  parameters whose notification attribute is set; Opticore does not set
-  attributes. The listed parameters update the cache and are published as an
-  event (§10), so a client can react.
+- **Value-change informs.** `4 VALUE CHANGE` usually reports changes made by
+  someone other than the ACS (local web UI, the subscriber), and arrives only
+  for parameters whose notification attribute is set. It is not exclusive to
+  that case: a lab ZTE F670L raises `4 VALUE CHANGE` immediately after an ACS
+  `SetParameterValues`, so never treat the event as proof that someone else
+  changed something. Opticore only updates the cache from it and publishes it
+  as an event (§10).
+- **Vendor event codes.** Devices also send codes outside the numbered set, for
+  example `M Reboot` on a Huawei after an ACS `Reboot`. Keep every code string
+  verbatim; the numbered ones map to event types, the rest are stored as
+  `inform` with the raw code in the detail.
 - **Inform idempotency.** A device retries the same Inform on timeout
   (`RetryCount` shows it). The snapshot write is an upsert and therefore
   idempotent. Event rows are deduplicated on (device, event codes,
@@ -705,8 +711,11 @@ how cutover can work:
 - Do not rely on reading `ManagementServer.URL` from the device: consumer ONTs
   report it as writable with no value.
 - Factory reset wipes the ACS URL on the device, but option 43 hands it back on
-  the next DHCP lease, so a reset device returns without a site visit. Verify
-  this once per ONT model.
+  the next DHCP lease, so a reset device returns without a site visit. Verified
+  on a lab HG8145V5 and F670L (both sent `0 BOOTSTRAP`, `RetryCount 0`, within
+  seconds of the reset); a lab HG8245H5 did not come back at all. Check this per
+  ONT model before relying on it: a model that ignores option 43 stays dark
+  after a reset until someone points it at the ACS.
 - Order: one device, one PON port, one OLT (per-device URL or scoped option 43),
   then the site (port swap). Delete the old engine only after a parity window on
   every ONT model.
@@ -827,7 +836,8 @@ Resolved:
 Still open:
 
 1. Does option 43 override a per-device `ManagementServer.URL` on renewal, per
-   ONT model? Decides how canaries stick (§13).
+   ONT model? Decides how canaries stick (§13). Not needed for a reset: option
+   43 wins there (§13).
 2. Source-address check vs ACS-side Digest for the Inform (§3): pick one before
    production rollout.
 3. Should Opticore push a fleet-wide `PeriodicInformInterval` itself (like the
