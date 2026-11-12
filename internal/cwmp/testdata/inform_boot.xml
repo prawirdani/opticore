@@ -5,12 +5,12 @@
   </soap-env:Header>
   <soap-env:Body>
     <cwmp:Inform>
-      <cwmp:DeviceID>
+      <cwmp:DeviceId>
         <cwmp:Manufacturer>Huawei Technologies Co., Ltd.</cwmp:Manufacturer>
         <cwmp:OUI>00259E</cwmp:OUI>
         <cwmp:ProductClass>HG8245H</cwmp:ProductClass>
         <cwmp:SerialNumber>48575443A1B2C3D4</cwmp:SerialNumber>
-      </cwmp:DeviceID>
+      </cwmp:DeviceId>
       <cwmp:EventList soap-enc:arrayType="cwmp:EventStruct[2]">
         <cwmp:EventStruct>
           <cwmp:EventCode>0 BOOTSTRAP</cwmp:EventCode>

@@ -184,7 +184,7 @@ const informTpl = `<?xml version="1.0" encoding="UTF-8"?>
 <soap-env:Envelope xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
 <soap-env:Header><cwmp:ID soap-env:mustUnderstand="1">inf</cwmp:ID></soap-env:Header>
 <soap-env:Body><cwmp:Inform>
-<cwmp:DeviceID><cwmp:Manufacturer>Huawei</cwmp:Manufacturer><cwmp:OUI>00259E</cwmp:OUI><cwmp:ProductClass>HG8145V5</cwmp:ProductClass><cwmp:SerialNumber>%s</cwmp:SerialNumber></cwmp:DeviceID>
+<cwmp:DeviceId><cwmp:Manufacturer>Huawei</cwmp:Manufacturer><cwmp:OUI>00259E</cwmp:OUI><cwmp:ProductClass>HG8145V5</cwmp:ProductClass><cwmp:SerialNumber>%s</cwmp:SerialNumber></cwmp:DeviceId>
 <cwmp:EventList soap-enc:arrayType="cwmp:EventStruct[1]">%s</cwmp:EventList>
 <cwmp:MaxEnvelopes>1</cwmp:MaxEnvelopes>
 <cwmp:CurrentTime>%s</cwmp:CurrentTime>

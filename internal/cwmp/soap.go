@@ -339,7 +339,12 @@ func (d *Doc) decodeHeader(i int32, h *Header) {
 }
 
 func (d *Doc) decodeInform(method int32, in *Inform) {
-	if did := d.Child(method, "DeviceID"); did >= 0 {
+	// TR-069 spells it DeviceId; some implementations send DeviceID.
+	did := d.Child(method, "DeviceId")
+	if did < 0 {
+		did = d.Child(method, "DeviceID")
+	}
+	if did >= 0 {
 		in.DeviceID.Manufacturer = d.childString(did, "Manufacturer")
 		in.DeviceID.OUI = d.childString(did, "OUI")
 		in.DeviceID.ProductClass = d.childString(did, "ProductClass")

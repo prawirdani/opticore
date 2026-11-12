@@ -332,3 +332,20 @@ func TestDecodeIntoReusesDocAfterReuse(t *testing.T) {
 		t.Fatalf("m2 params = %d", len(m2.GetParameterValuesResponse.Params))
 	}
 }
+
+// Real devices spell the element DeviceId; some send DeviceID.
+func TestInformDeviceIDSpellings(t *testing.T) {
+	for _, tag := range []string{"DeviceId", "DeviceID"} {
+		xml := []byte(`<?xml version="1.0"?><soap-env:Envelope xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0"><soap-env:Body><cwmp:Inform><cwmp:` + tag + `><cwmp:OUI>00259E</cwmp:OUI><cwmp:ProductClass>HG8145V5</cwmp:ProductClass><cwmp:SerialNumber>48575443BD7589AB</cwmp:SerialNumber></cwmp:` + tag + `><cwmp:EventList><cwmp:EventStruct><cwmp:EventCode>0 BOOTSTRAP</cwmp:EventCode></cwmp:EventStruct></cwmp:EventList><cwmp:MaxEnvelopes>1</cwmp:MaxEnvelopes></cwmp:Inform></soap-env:Body></soap-env:Envelope>`)
+		m, err := Decode(xml)
+		if err != nil {
+			t.Fatalf("%s: %v", tag, err)
+		}
+		if m.Inform.DeviceID.SerialNumber != "48575443BD7589AB" || m.Inform.DeviceID.OUI != "00259E" {
+			t.Errorf("%s: DeviceId = %+v", tag, m.Inform.DeviceID)
+		}
+		if m.Version != "1.0" {
+			t.Errorf("%s: version = %q", tag, m.Version)
+		}
+	}
+}

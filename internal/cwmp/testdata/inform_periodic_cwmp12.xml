@@ -7,12 +7,12 @@
   </soap-env:Header>
   <soap-env:Body>
     <cwmp:Inform>
-      <cwmp:DeviceID>
+      <cwmp:DeviceId>
         <cwmp:Manufacturer>Huawei</cwmp:Manufacturer>
         <cwmp:OUI>00259E</cwmp:OUI>
         <cwmp:ProductClass>EG8145V5</cwmp:ProductClass>
         <cwmp:SerialNumber>HWTC0A1B2C3D</cwmp:SerialNumber>
-      </cwmp:DeviceID>
+      </cwmp:DeviceId>
       <cwmp:EventList soap-enc:arrayType="cwmp:EventStruct[1]">
         <cwmp:EventStruct>
           <cwmp:EventCode>2 PERIODIC</cwmp:EventCode>
