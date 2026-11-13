@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prawirdani/opticore/client"
 	"github.com/prawirdani/opticore/internal/cwmp"
 	"github.com/prawirdani/opticore/internal/hook"
 	"github.com/prawirdani/opticore/internal/store"
@@ -180,7 +181,7 @@ func (h *Sessions) Inform(ctx context.Context, s *cwmp.Session, in *cwmp.Inform)
 		ping:      waiting,
 		pingReady: diagComplete,
 	}
-	if h.Hook != nil && hook.Matches(rec.Events, h.HookEvents) {
+	if h.Hook != nil && client.Matches(rec.Events, h.HookEvents) {
 		st.apiQueue, st.queue = tasks, nil
 		st.hook = &hookState{
 			started:  time.Now(),

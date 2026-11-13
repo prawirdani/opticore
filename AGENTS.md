@@ -40,7 +40,10 @@ GenieACS owns `7547`; the built-in defaults are still `7547`/`8081`.
   precomputed writer, device auth. No domain logic.
 - `internal/acs` — session engine, task service, jobs, hook wiring. Session
   state is `*acs.state` stored in `cwmp.Session.Data`.
-- `internal/hook` — provisioner client and the server-side handler helper.
+- `client` — public Go SDK (API client, task builders, SSE `Watch`, hook
+  handler). Standard library only, never imports `internal/`; hook wire types
+  live here and `internal/hook` aliases them.
+- `internal/hook` — the daemon's side of the hook call.
 - `internal/api` — `/v1` handlers, SSE, tokens.
 - `internal/store` — hand-written SQL, secret sealing, migrations runner.
 - `internal/tui` — operator console over `Deps` interfaces; no SQL of its own,

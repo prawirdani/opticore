@@ -6,7 +6,6 @@ package hook
 import (
 	"bytes"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,54 +14,21 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/prawirdani/opticore/client"
 )
 
-// Task is one RPC the provisioner wants sent, in the same shape as the API.
-type Task struct {
-	Name string          `json:"name"`
-	Args json.RawMessage `json:"args,omitempty"`
-}
-
-// Param is a parameter value, as carried in the Inform.
-type Param struct {
-	Value string `json:"value"`
-	Type  string `json:"type,omitempty"`
-}
-
-// Device is the identity the provisioner needs to look the subscriber up.
-type Device struct {
-	ID              string `json:"id"`
-	Serial          string `json:"serial"`
-	OUI             string `json:"oui"`
-	ProductClass    string `json:"product_class"`
-	SoftwareVersion string `json:"software_version"`
-}
-
-// Result is the outcome of one task from a previous step.
-type Result struct {
-	Name      string          `json:"name"`
-	Status    string          `json:"status"` // done | failed | unknown
-	Result    json.RawMessage `json:"result,omitempty"`
-	FaultCode *int            `json:"fault_code,omitempty"`
-	Fault     string          `json:"fault,omitempty"`
-}
-
-// Step is one request to the provisioner.
-type Step struct {
-	Step     int              `json:"step"`
-	Device   Device           `json:"device"`
-	Events   []string         `json:"events"`
-	Params   map[string]Param `json:"params,omitempty"`
-	Prefetch map[string]Param `json:"prefetch,omitempty"`
-	Results  []Result         `json:"results,omitempty"`
-	State    string           `json:"state,omitempty"`
-}
-
-// Reply is the provisioner's answer. Empty Tasks ends the hook for the session.
-type Reply struct {
-	Tasks []Task `json:"tasks"`
-	State string `json:"state,omitempty"`
-}
+// The provisioner-side wire types live in the public client package so a Go
+// provisioner and this caller share one definition. These aliases keep the
+// names internal/acs already uses.
+type (
+	Task   = client.Task
+	Param  = client.Param
+	Device = client.Device
+	Result = client.Result
+	Step   = client.Step
+	Reply  = client.Reply
+)
 
 // Client calls one provisioner endpoint.
 type Client struct {
@@ -139,54 +105,4 @@ func (c *Client) Step(ctx context.Context, s Step) (Reply, error) {
 		return Reply{}, fmt.Errorf("hook: decode reply: %w", err)
 	}
 	return r, nil
-}
-
-// Handler is the provisioner side. It verifies the bearer secret and calls fn.
-// A non-2xx answer from fn is not possible: return an error to send 500, which
-// Opticore treats as "hook failed, session continues".
-func Handler(secret string, fn func(context.Context, Step) ([]Task, error)) http.Handler {
-	return HandlerFunc(secret, func(ctx context.Context, s Step) (Reply, error) {
-		tasks, err := fn(ctx, s)
-		return Reply{Tasks: tasks}, err
-	})
-}
-
-// HandlerFunc is Handler with access to the opaque state field.
-func HandlerFunc(secret string, fn func(context.Context, Step) (Reply, error)) http.Handler {
-	want := "Bearer " + secret
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte(want)) != 1 {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		var s Step
-		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&s); err != nil {
-			http.Error(w, "bad step", http.StatusBadRequest)
-			return
-		}
-		reply, err := fn(r.Context(), s)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(reply)
-	})
-}
-
-// Matches reports whether any Inform event code is on the trigger list. An
-// entry matches a code that starts with it, so "0" matches "0 BOOTSTRAP".
-func Matches(events, triggers []string) bool {
-	for _, e := range events {
-		for _, t := range triggers {
-			if t != "" && strings.HasPrefix(e, t) {
-				return true
-			}
-		}
-	}
-	return false
 }

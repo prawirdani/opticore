@@ -10,11 +10,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/prawirdani/opticore/client"
 )
 
 func TestHandlerAuthAndSteps(t *testing.T) {
 	var got Step
-	h := Handler("s3cret", func(_ context.Context, s Step) ([]Task, error) {
+	h := client.HookHandler("s3cret", func(_ context.Context, s Step) ([]Task, error) {
 		got = s
 		if s.Step == 1 {
 			return []Task{{Name: "set", Args: json.RawMessage(`{"values":[["A","b"]]}`)}}, nil
@@ -75,7 +77,7 @@ func TestUnixSocket(t *testing.T) {
 	if err != nil {
 		t.Skipf("unix socket unsupported here: %v", err)
 	}
-	srv := &http.Server{Handler: Handler("s", func(context.Context, Step) ([]Task, error) {
+	srv := &http.Server{Handler: client.HookHandler("s", func(context.Context, Step) ([]Task, error) {
 		return []Task{{Name: "reboot"}}, nil
 	})}
 	go srv.Serve(ln)
@@ -103,22 +105,6 @@ func TestNewValidation(t *testing.T) {
 	} {
 		if _, err := New(tc.url, tc.secret, time.Second); err == nil {
 			t.Errorf("New(%q,%q) accepted", tc.url, tc.secret)
-		}
-	}
-}
-
-func TestMatches(t *testing.T) {
-	for _, tc := range []struct {
-		events, triggers []string
-		want             bool
-	}{
-		{[]string{"0 BOOTSTRAP"}, []string{"0 BOOTSTRAP"}, true},
-		{[]string{"0 BOOTSTRAP", "1 BOOT"}, []string{"0"}, true},
-		{[]string{"2 PERIODIC"}, []string{"0 BOOTSTRAP"}, false},
-		{[]string{"2 PERIODIC"}, nil, false},
-	} {
-		if got := Matches(tc.events, tc.triggers); got != tc.want {
-			t.Errorf("Matches(%v,%v) = %v", tc.events, tc.triggers, got)
 		}
 	}
 }

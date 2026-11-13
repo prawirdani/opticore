@@ -300,6 +300,40 @@ that is down means "no extra work", never a failed session. Not calling the
 hook at all is normal: with no `OPTICORE_HOOK_URL` the daemon only runs what
 the API queues.
 
+## Go client
+
+`github.com/prawirdani/opticore/client` is a thin, standard-library-only
+client for the HTTP API and the hook. It adds no logic of its own.
+
+```go
+c, err := client.New("http://acs:8081", token)
+tasks, err := c.CreateTasks(ctx, "48575443BD7589AB", []client.Task{
+	client.Set(client.Value{Path: "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID", Value: "Home"}),
+	client.Ping("8.8.8.8", client.PingCount(4)),
+}, "order-1234") // Idempotency-Key, "" for none
+
+events, errs := c.Watch(ctx, client.WatchFilter{Types: []string{"task", "job"}})
+for e := range events {
+	if e.Task != nil && e.Task.Fault() != nil {
+		log.Print(e.Task.Fault()) // *client.Fault: CWMP fault code and string
+	}
+}
+if err := <-errs; err != nil { /* a *client.Error: 4xx other than 408/429 */ }
+
+http.Handle("/hook", client.HookHandler(secret, func(ctx context.Context, s client.Step) ([]client.Task, error) {
+	if !client.Matches(s.Events, []string{"0 BOOTSTRAP"}) || s.Step > 1 {
+		return nil, nil // no tasks ends the hook
+	}
+	return []client.Task{client.Get("InternetGatewayDevice.DeviceInfo.")}, nil
+}))
+```
+
+Builders: `Get`, `Set`, `AddObject`, `DeleteObject`, `Reboot`, `Reset`, `Ping`.
+API errors are `*client.Error{Status, Code, Message}`. `Watch` reconnects on a
+dropped stream, 5xx or 429 with `Last-Event-ID`, backing off from 100 ms to
+5 s; cancelling the context closes both channels. `HandlerFunc` is the hook
+handler with access to the opaque `state`.
+
 ## HTTP API
 
 Bearer tokens, hashed at rest, with scopes `read`, `write` and `reveal`.
@@ -496,7 +530,6 @@ Planned, not built yet:
   `TransferComplete`.
 - `token list` and `token revoke`.
 - Creating a job from the CLI.
-- The public Go SDK in `client/`; the hook handler is `internal/hook` for now.
 - Revealing a secret from the console, and creating jobs from it.
 
 Out of scope on purpose: `ScheduleInform`, `ScheduleDownload`, `Upload`,
@@ -509,7 +542,8 @@ multi-tenancy, USP and TR-181-specific handling.
 cmd/opticore/     daemon wiring, CLI
 internal/cwmp/    HTTP transport, sessions, XML scanner, SOAP decode/write, auth
 internal/acs/     session engine, task service, jobs, wake self-heal
-internal/hook/    provisioner client, server-side handler, step payloads
+client/           public Go SDK: API client, task builders, SSE watch, hook handler
+internal/hook/    the daemon's side of the hook; wire types alias client/
 internal/api/     /v1 handlers, SSE, tokens
 internal/store/   pgx store, secrets, migrations runner
 internal/wake/    connection-request client (Digest + Basic)

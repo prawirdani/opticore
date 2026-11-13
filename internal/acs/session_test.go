@@ -19,6 +19,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/prawirdani/opticore/client"
 	"github.com/prawirdani/opticore/internal/config"
 	"github.com/prawirdani/opticore/internal/cwmp"
 	"github.com/prawirdani/opticore/internal/hook"
@@ -616,7 +617,7 @@ func TestCloseMarksNonIdempotentInflightUnknown(t *testing.T) {
 // second session.
 func TestHookProvisionerRunsInSession(t *testing.T) {
 	var steps []hook.Step
-	prov := httptest.NewServer(hook.Handler("k", func(_ context.Context, s hook.Step) ([]hook.Task, error) {
+	prov := httptest.NewServer(client.HookHandler("k", func(_ context.Context, s hook.Step) ([]hook.Task, error) {
 		steps = append(steps, s)
 		switch s.Step {
 		case 1:
@@ -722,7 +723,7 @@ func TestHookFailureFallsBack(t *testing.T) {
 // Only events on the trigger list start the hook.
 func TestHookNotCalledWithoutTriggerEvent(t *testing.T) {
 	calls := 0
-	prov := httptest.NewServer(hook.Handler("k", func(context.Context, hook.Step) ([]hook.Task, error) {
+	prov := httptest.NewServer(client.HookHandler("k", func(context.Context, hook.Step) ([]hook.Task, error) {
 		calls++
 		return nil, nil
 	}))

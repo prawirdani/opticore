@@ -18,7 +18,7 @@ const encPrefix = "enc:"
 
 var taskNames = map[string]bool{
 	"get": true, "set": true, "add_object": true, "delete_object": true,
-	"reboot": true, "reset": true,
+	"reboot": true, "reset": true, "ping": true,
 }
 
 var taskStatuses = map[string]bool{
