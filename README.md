@@ -343,7 +343,7 @@ proxy.
 ```go
 page, err := c.ListDevices(ctx, client.ListDevicesOptions{ProductClass: "HG8145V5", Limit: 50})
 dev, err := c.GetDevice(ctx, "48575443BD7589AB") // id or serial
-params, err := c.ListParams(ctx, dev.ID, "InternetGatewayDevice.WANDevice.", false)
+params, err := c.ListParams(ctx, dev.ID, "InternetGatewayDevice.WANDevice.")
 tasks, err := c.ListTasks(ctx, dev.ID, client.ListTasksOptions{Status: "failed"})
 events, err := c.ListEvents(ctx, dev.ID, client.ListEventsOptions{Limit: 20})
 ```
@@ -376,7 +376,7 @@ and `PingInterface`.
 Creating tasks wakes the device. To poll one to its end:
 
 ```go
-t, err := c.GetTask(ctx, tasks[0].ID, false)
+t, err := c.GetTask(ctx, tasks[0].ID)
 switch t.Status {
 case "done":   // t.Result holds the output
 case "failed": f := t.Fault()  // *client.Fault, nil unless a CWMP fault came back
@@ -503,9 +503,9 @@ device is addressed.
 
 Lists answer `{"data": [...], "meta": {"next_cursor": "...", "total": n}}`.
 Errors answer `{"error": {"code": "DEVICE_NOT_FOUND", "message": "...",
-"details": {}}}`; codes include `VALIDATION` (400), `UNAUTHORIZED` (401),
-`FORBIDDEN` (403), `DEVICE_NOT_FOUND` / `TASK_NOT_FOUND` / `JOB_NOT_FOUND`
-(404), `CONFLICT` (409) and `DEVICE_UNREACHABLE` (502).
+"details": {}}}`; codes include `VALIDATION` (400), `DEVICE_NOT_FOUND` /
+`TASK_NOT_FOUND` / `JOB_NOT_FOUND` (404), `CONFLICT` (409),
+`DEVICE_UNREACHABLE` (502) and `INTERNAL` (500).
 
 ### Jobs
 
@@ -674,7 +674,6 @@ Planned, not built yet:
 - Firmware: upload, a device-facing file server, the `download` task and
   `TransferComplete`.
 - Creating a job from the CLI.
-- Revealing a secret from the console, and creating jobs from it.
 
 Out of scope on purpose: `ScheduleInform`, `ScheduleDownload`, `Upload`,
 parameter attributes and notification flags, TLS on the CWMP port, clustering,
