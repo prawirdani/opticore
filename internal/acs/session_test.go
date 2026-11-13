@@ -801,3 +801,80 @@ func TestCRHostIs(t *testing.T) {
 		}
 	}
 }
+
+// gpvNames returns the parameter name lists sent in GetParameterValues.
+func (f *fakeCPE) gpvNames() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]string(nil), f.gpvs...)
+}
+
+func TestGetTaskWithoutPathsReadsTheDeviceRoot(t *testing.T) {
+	h := newHarness(t, nil)
+	ctx := context.Background()
+	h.sess.inform("48575443BD7589AB", []string{"0 BOOTSTRAP", "1 BOOT"})
+	h.sess.run() // CR credentials
+
+	h.sess.params = map[string]string{
+		"InternetGatewayDevice.DeviceInfo.SoftwareVersion":           "V5R020C10S271",
+		"InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID": "HomeNet",
+	}
+	if _, err := h.svc.Enqueue(ctx, "48575443BD7589AB", []store.NewTask{{Name: "get"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.sess.inform("48575443BD7589AB", []string{"2 PERIODIC"})
+	if n := h.sess.run(); n != 1 {
+		t.Fatalf("answered %d requests, want 1 (one GPV of the root)", n)
+	}
+	gpvs := h.sess.gpvNames()
+	if len(gpvs) != 1 || len(gpvs[0]) != 1 || gpvs[0][0] != "InternetGatewayDevice." {
+		t.Fatalf("device saw GPV names %v, want one partial root path", gpvs)
+	}
+	d, _ := h.st.GetDevice(ctx, "48575443BD7589AB")
+	if got := d.Params["InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID"].Value; got != "HomeNet" {
+		t.Errorf("cached SSID = %q, want HomeNet", got)
+	}
+	ts, _ := h.st.ListTasks(ctx, "48575443BD7589AB", 10)
+	if len(ts) != 1 || ts[0].Status != "done" {
+		t.Fatalf("tasks = %+v", ts)
+	}
+	var res struct {
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal(ts[0].Result, &res); err != nil || res.Count != 2 {
+		t.Errorf("result = %s (err %v), want count 2", ts[0].Result, err)
+	}
+}
+
+func TestGetTaskCountsEveryChunk(t *testing.T) {
+	h := newHarnessWith(t, nil, func(_ *harness, s *Sessions) { s.GPVBatch = 1 })
+	ctx := context.Background()
+	h.sess.inform("48575443BD7589AB", []string{"0 BOOTSTRAP", "1 BOOT"})
+	h.sess.run() // CR credentials
+
+	h.sess.params = map[string]string{
+		"InternetGatewayDevice.DeviceInfo.SoftwareVersion": "V5R020C10S271",
+		"InternetGatewayDevice.DeviceInfo.SerialNumber":    "48575443BD7589AB",
+	}
+	if _, err := h.svc.Enqueue(ctx, "48575443BD7589AB", []store.NewTask{{
+		Name: "get", Args: json.RawMessage(`{"paths":["InternetGatewayDevice.DeviceInfo.SoftwareVersion","InternetGatewayDevice.DeviceInfo.SerialNumber"]}`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.sess.inform("48575443BD7589AB", []string{"2 PERIODIC"})
+	if n := h.sess.run(); n != 2 {
+		t.Fatalf("answered %d requests, want 2 (one GPV per name at batch 1)", n)
+	}
+	ts, _ := h.st.ListTasks(ctx, "48575443BD7589AB", 10)
+	if len(ts) != 1 || ts[0].Status != "done" {
+		t.Fatalf("tasks = %+v", ts)
+	}
+	var res struct {
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal(ts[0].Result, &res); err != nil || res.Count != 2 {
+		t.Errorf("result = %s (err %v), want count 2 across both chunks", ts[0].Result, err)
+	}
+}

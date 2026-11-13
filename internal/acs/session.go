@@ -44,6 +44,7 @@ type state struct {
 	dev      store.Device
 	root     string // "InternetGatewayDevice." or "Device."
 	queue    []store.Task
+	got      int // parameters counted across the chunks of one get
 	reloaded bool
 
 	crWanted bool
@@ -259,7 +260,7 @@ func (h *Sessions) Next(ctx context.Context, s *cwmp.Session) (cwmp.Request, boo
 			}
 			continue
 		}
-		st.cur, st.steps, st.prev = &t, steps, nil
+		st.cur, st.steps, st.prev, st.got = &t, steps, nil, 0
 	}
 }
 
@@ -358,6 +359,15 @@ func (h *Sessions) plan(st *state, t *store.Task) ([]cwmp.Request, error) {
 		paths, err := h.subst(st, t, a.Paths)
 		if err != nil {
 			return nil, err
+		}
+		if len(paths) == 0 {
+			// No paths: read everything under the device's root (TR-069 lets
+			// an empty name list mean every parameter, but CPEs disagree, so
+			// ask for the root partial path instead).
+			if st.root == "" {
+				return nil, errors.New("device root unknown; pass at least one path")
+			}
+			paths = []string{st.root}
 		}
 		var steps []cwmp.Request
 		for _, chunk := range chunkNames(paths, h.batch()) {
@@ -496,10 +506,12 @@ func (h *Sessions) Response(ctx context.Context, s *cwmp.Session, req cwmp.Reque
 		if err := h.Store.MergeParams(ctx, s.DeviceID, cache); err != nil {
 			return err
 		}
+		// Count every chunk: len(cache) alone is only the last response.
+		st.got += len(cache)
 		if len(st.steps) > 0 {
 			return nil // more chunks of the same get
 		}
-		return h.done(ctx, s, t, map[string]any{"count": len(cache)})
+		return h.done(ctx, s, t, map[string]any{"count": st.got})
 	case "set":
 		status := m.SetParameterValuesResponse.Status
 		cache := map[string]store.Param{}

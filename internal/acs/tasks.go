@@ -100,9 +100,12 @@ func (svc *Service) Enqueue(ctx context.Context, idOrSerial string, tasks []stor
 func (svc *Service) prepare(t *store.NewTask) error {
 	switch t.Name {
 	case "get":
+		if len(t.Args) == 0 {
+			t.Args = json.RawMessage(`{}`)
+		}
 		var a GetArgs
-		if err := json.Unmarshal(t.Args, &a); err != nil || len(a.Paths) == 0 {
-			return errors.New(`args must be {"paths": [...]} with at least one path`)
+		if err := json.Unmarshal(t.Args, &a); err != nil {
+			return errors.New(`args must be {"paths": [...]}, or {} for every parameter`)
 		}
 	case "set":
 		var a SetArgs
