@@ -42,12 +42,12 @@ type taskJSON struct {
 	BatchSeq  int             `json:"batch_seq"`
 }
 
-func (s *Server) taskView(t store.Task, reveal bool) taskJSON {
+func (s *Server) taskView(t store.Task) taskJSON {
 	return taskJSON{
 		ID:        t.ID,
 		Name:      t.Name,
-		Args:      s.scrub(t.Args, reveal),
-		Prev:      s.scrub(t.Prev, reveal),
+		Args:      t.Args,
+		Prev:      t.Prev,
 		Result:    t.Result,
 		Status:    t.Status,
 		Attempts:  t.Attempts,
@@ -60,48 +60,6 @@ func (s *Server) taskView(t store.Task, reveal bool) taskJSON {
 		BatchID:   t.BatchID,
 		BatchSeq:  t.BatchSeq,
 	}
-}
-
-// scrub masks secret task values by path. A set task's args carry values as
-// [[path, value, type], ...]; prev is a {path: [value, type]} map. reveal
-// returns the stored value unchanged.
-func (s *Server) scrub(raw json.RawMessage, reveal bool) json.RawMessage {
-	if len(raw) == 0 || reveal {
-		return raw
-	}
-	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return raw
-	}
-	m, ok := v.(map[string]any)
-	if !ok {
-		return raw
-	}
-	if vals, ok := m["values"].([]any); ok {
-		for _, item := range vals {
-			tuple, ok := item.([]any)
-			if !ok || len(tuple) < 2 {
-				continue
-			}
-			if path, ok := tuple[0].(string); ok && store.IsSecretPath(path) {
-				tuple[1] = "••••"
-			}
-		}
-	} else {
-		for path, item := range m {
-			if !store.IsSecretPath(path) {
-				continue
-			}
-			if tuple, ok := item.([]any); ok && len(tuple) > 0 {
-				tuple[0] = "••••"
-			}
-		}
-	}
-	out, err := json.Marshal(m)
-	if err != nil {
-		return raw
-	}
-	return out
 }
 
 type taskInput struct {
@@ -157,7 +115,7 @@ func (s *Server) createTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	views := make([]taskJSON, 0, len(out))
 	for _, t := range out {
-		views = append(views, s.taskView(t, false))
+		views = append(views, s.taskView(t))
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"data": views})
 }
@@ -248,7 +206,6 @@ func (s *Server) deleteDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
-	reveal := revealRequested(r)
 	id, err := strconv.ParseInt(r.PathValue("taskId"), 10, 64)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION", "task id must be an integer")
@@ -259,5 +216,5 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 		s.deviceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": s.taskView(t, reveal)})
+	writeJSON(w, http.StatusOK, map[string]any{"data": s.taskView(t)})
 }

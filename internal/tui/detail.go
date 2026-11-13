@@ -66,12 +66,8 @@ func buildPage(params map[string]store.Param, prefix string) paramPage {
 	return page
 }
 
-// paramValue never returns a secret: the cache stores secrets as a marker
-// already, and a sealed value is masked here too, defensively.
+// paramValue returns the cached value as stored.
 func paramValue(p store.Param) string {
-	if p.Secret || strings.HasPrefix(p.Value, "enc:") {
-		return "••••"
-	}
 	return p.Value
 }
 

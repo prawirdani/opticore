@@ -442,7 +442,7 @@ func TestTaskStatusFilterCycle(t *testing.T) {
 	}
 }
 
-func TestDetailExpandsOneLevelAndNeverPrintsSecrets(t *testing.T) {
+func TestDetailExpandsOneLevelAndShowsStoredValues(t *testing.T) {
 	d := device(1)
 	f := &fake{
 		devices: []store.Device{d},
@@ -450,7 +450,7 @@ func TestDetailExpandsOneLevelAndNeverPrintsSecrets(t *testing.T) {
 			"InternetGatewayDevice.DeviceInfo.Manufacturer":                    {Value: "Huawei"},
 			"InternetGatewayDevice.DeviceInfo.SoftwareVersion":                 {Value: "V5R020C10S271"},
 			"InternetGatewayDevice.ManagementServer.URL":                       {Value: "http://acs:7547/"},
-			"InternetGatewayDevice.ManagementServer.ConnectionRequestPassword": {Secret: true, Value: "hunter2"},
+			"InternetGatewayDevice.ManagementServer.ConnectionRequestPassword": {Value: "hunter2"},
 		}},
 		events: []store.Event{{ID: 1, DeviceID: d.ID, At: testNow, Type: "boot", Detail: []byte(`{"codes":["1 BOOT"]}`)}},
 	}
@@ -482,11 +482,11 @@ func TestDetailExpandsOneLevelAndNeverPrintsSecrets(t *testing.T) {
 	}
 	m = press(t, m, keyEnter)
 	view = m.View()
-	if !strings.Contains(view, "••••") {
-		t.Fatalf("secret leaf not masked:\n%s", view)
+	if !strings.Contains(view, "hunter2") {
+		t.Fatalf("stored value not shown:\n%s", view)
 	}
-	if strings.Contains(view, "hunter2") {
-		t.Fatalf("secret value leaked into the screen:\n%s", view)
+	if strings.Contains(view, "••••") {
+		t.Fatalf("stored value masked:\n%s", view)
 	}
 
 	m = press(t, m, keyEsc) // collapse ManagementServer.
@@ -503,12 +503,12 @@ func TestDetailExpandsOneLevelAndNeverPrintsSecrets(t *testing.T) {
 	}
 }
 
-func TestParamValueMasksSecrets(t *testing.T) {
-	if got := paramValue(store.Param{Secret: true, Value: "hunter2"}); got != "••••" {
-		t.Fatalf("secret param rendered as %q", got)
+func TestParamValueShowsStoredValues(t *testing.T) {
+	if got := paramValue(store.Param{Value: "hunter2"}); got != "hunter2" {
+		t.Fatalf("param rendered as %q, want the stored value", got)
 	}
-	if got := paramValue(store.Param{Value: "enc:abc"}); got != "••••" {
-		t.Fatalf("sealed param rendered as %q", got)
+	if got := paramValue(store.Param{Value: "enc:abc"}); got != "enc:abc" {
+		t.Fatalf("sealed-looking param rendered as %q", got)
 	}
 	if got := paramValue(store.Param{Value: "plain"}); got != "plain" {
 		t.Fatalf("plain param rendered as %q", got)

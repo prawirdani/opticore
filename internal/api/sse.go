@@ -25,7 +25,6 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL", "streaming unsupported")
 		return
 	}
-	reveal := revealRequested(r)
 	types := typeFilter(r.URL.Query().Get("type"))
 	device := r.URL.Query().Get("device_id")
 	cursor := r.Header.Get("Last-Event-ID")
@@ -57,7 +56,7 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case <-poll.C:
-			s.ssePump(r.Context(), w, flusher, types, device, reveal, &cur)
+			s.ssePump(r.Context(), w, flusher, types, device, &cur)
 		}
 	}
 }
@@ -154,7 +153,7 @@ func parseRowCursor(rest string) (int64, time.Time, bool) {
 }
 
 func (s *Server) ssePump(ctx context.Context, w http.ResponseWriter, flusher http.Flusher,
-	types map[string]bool, device string, reveal bool, cur *sseCursor) {
+	types map[string]bool, device string, cur *sseCursor) {
 	for {
 		events, err := s.st.EventsSinceID(ctx, cur.eventID, sseBatch)
 		if err != nil {
@@ -196,7 +195,7 @@ func (s *Server) ssePump(ctx context.Context, w http.ResponseWriter, flusher htt
 			}
 			id := "t" + strconv.FormatInt(t.ID, 10) + ":" +
 				strconv.FormatInt(t.UpdatedAt.UnixNano(), 10)
-			if !writeSSE(w, flusher, id, "task", s.taskView(t, reveal)) {
+			if !writeSSE(w, flusher, id, "task", s.taskView(t)) {
 				return
 			}
 		}

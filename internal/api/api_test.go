@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -122,8 +123,10 @@ func seedDevice(t *testing.T, st *store.Store, id, serial string, at time.Time, 
 				Value: "V5R020C10S271", Type: "xsd:string",
 				UpdatedAt: &at,
 			},
-			"InternetGatewayDevice.ManagementServer.Password":     {Secret: true},
-			"InternetGatewayDevice.ManagementServer.ParameterKey": {Value: "visible", Type: "xsd:string"},
+			"InternetGatewayDevice.DeviceInfo.ProvisioningCode":                   {Value: "PROV-1", Type: "xsd:string"},
+			"InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase": {Value: "wifi-key"},
+			"InternetGatewayDevice.ManagementServer.Password":                     {Value: "hunter2"},
+			"InternetGatewayDevice.ManagementServer.ParameterKey":                 {Value: "visible", Type: "xsd:string"},
 		},
 	}
 	if _, _, err := st.RecordInform(context.Background(), in); err != nil {
@@ -201,7 +204,7 @@ func TestNoAuthorizationRequired(t *testing.T) {
 	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1/params?reveal=1", nil)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("reveal without a token = %d, want 200", resp.StatusCode)
+		t.Fatalf("reveal query = %d, want 200", resp.StatusCode)
 	}
 }
 
@@ -240,7 +243,7 @@ func TestDeviceJSONAndFreshness(t *testing.T) {
 	d := list.Data[0]
 	if d.ID != "00259E-HG8145V5-SER1" || d.Serial != "SER1" || d.OUI != "00259E" ||
 		d.ProductClass != "HG8145V5" || d.CRURL == "" || !d.CRReady ||
-		d.Freshness != "fresh" || d.ParamsCount != 3 {
+		d.Freshness != "fresh" || d.ParamsCount != 5 {
 		t.Errorf("device JSON = %+v", d)
 	}
 	if string(d.LastFault) != "null" {
@@ -256,7 +259,7 @@ func TestDeviceJSONAndFreshness(t *testing.T) {
 	}
 	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1", nil)
 	decode(t, resp, &detail)
-	if detail.Data.ID == "" || len(detail.Data.Params) != 3 {
+	if detail.Data.ID == "" || len(detail.Data.Params) != 5 {
 		t.Errorf("detail = %+v", detail.Data)
 	}
 	if detail.Data.Tasks["total"] != 0 {
@@ -286,10 +289,43 @@ func TestDeviceJSONAndFreshness(t *testing.T) {
 	}
 }
 
-func TestParamsMaskingAndReveal(t *testing.T) {
+func TestParamsReturnStoredValues(t *testing.T) {
 	st := testStore(t)
 	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
+
+	want := map[string]string{
+		"InternetGatewayDevice.DeviceInfo.ProvisioningCode":                   "PROV-1",
+		"InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase": "wifi-key",
+		"InternetGatewayDevice.ManagementServer.Password":                     "hunter2",
+		"InternetGatewayDevice.ManagementServer.ParameterKey":                 "visible",
+	}
+	var plain struct {
+		Data []struct {
+			Path  string `json:"path"`
+			Value string `json:"value"`
+			Type  string `json:"type"`
+		} `json:"data"`
+	}
+	resp := request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1/params", nil)
+	decode(t, resp, &plain)
+	values := map[string]string{}
+	for _, p := range plain.Data {
+		values[p.Path] = p.Value
+	}
+	for path, wantValue := range want {
+		if values[path] != wantValue {
+			t.Errorf("%s = %q, want %q", path, values[path], wantValue)
+		}
+	}
+
+	// ?reveal=1 is accepted and changes nothing.
+	revealed := plain
+	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1/params?reveal=1", nil)
+	decode(t, resp, &revealed)
+	if !reflect.DeepEqual(revealed, plain) {
+		t.Errorf("reveal=1 changed the response:\n got %+v\nwant %+v", revealed, plain)
+	}
 
 	var out struct {
 		Data []struct {
@@ -298,27 +334,6 @@ func TestParamsMaskingAndReveal(t *testing.T) {
 			Type  string `json:"type"`
 		} `json:"data"`
 	}
-	resp := request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1/params", nil)
-	decode(t, resp, &out)
-	values := map[string]string{}
-	for _, p := range out.Data {
-		values[p.Path] = p.Value
-	}
-	if values["InternetGatewayDevice.ManagementServer.Password"] != "••••" {
-		t.Errorf("secret value = %q, want mask", values["InternetGatewayDevice.ManagementServer.Password"])
-	}
-	if values["InternetGatewayDevice.ManagementServer.ParameterKey"] != "visible" {
-		t.Errorf("ParameterKey = %q, want visible", values["InternetGatewayDevice.ManagementServer.ParameterKey"])
-	}
-
-	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1/params?reveal=1", nil)
-	decode(t, resp, &out)
-	for _, p := range out.Data {
-		if p.Path == "InternetGatewayDevice.ManagementServer.Password" && p.Value != "••••" {
-			t.Errorf("secret with reveal = %q, want mask (value is never cached)", p.Value)
-		}
-	}
-
 	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1/params?prefix=InternetGatewayDevice.ManagementServer.", nil)
 	decode(t, resp, &out)
 	if len(out.Data) != 2 {
@@ -409,7 +424,7 @@ func TestBatchCreationAndIdempotency(t *testing.T) {
 	}
 }
 
-func TestTaskRevealMasksSecrets(t *testing.T) {
+func TestTaskValuesRaw(t *testing.T) {
 	st := testStore(t)
 	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
@@ -433,7 +448,7 @@ func TestTaskRevealMasksSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var task struct {
+	type taskBody struct {
 		Data struct {
 			Args struct {
 				Values [][]string `json:"values"`
@@ -441,31 +456,89 @@ func TestTaskRevealMasksSecrets(t *testing.T) {
 			Prev map[string][]string `json:"prev"`
 		} `json:"data"`
 	}
+	var task taskBody
 	resp = request(t, ts.Client(), http.MethodGet,
 		fmt.Sprintf("%s/v1/tasks/%d", ts.URL, created.Data[0].ID), nil)
 	decode(t, resp, &task)
-	if task.Data.Args.Values[0][1] != "••••" {
-		t.Errorf("masked task arg = %q", task.Data.Args.Values[0][1])
+	if task.Data.Args.Values[0][1] != "hunter2" {
+		t.Errorf("task arg = %q, want hunter2", task.Data.Args.Values[0][1])
 	}
 	if task.Data.Args.Values[1][1] != "visibleuser" {
 		t.Errorf("non-secret task arg = %q, want visible", task.Data.Args.Values[1][1])
 	}
-	if task.Data.Prev["InternetGatewayDevice.ManagementServer.Password"][0] != "••••" {
-		t.Errorf("masked prev = %q", task.Data.Prev["InternetGatewayDevice.ManagementServer.Password"][0])
+	if task.Data.Prev["InternetGatewayDevice.ManagementServer.Password"][0] != "oldsecret" {
+		t.Errorf("prev = %q, want oldsecret", task.Data.Prev["InternetGatewayDevice.ManagementServer.Password"][0])
 	}
 	if task.Data.Prev["InternetGatewayDevice.ManagementServer.Username"][0] != "olduser" {
 		t.Errorf("non-secret prev = %q, want olduser", task.Data.Prev["InternetGatewayDevice.ManagementServer.Username"][0])
 	}
 
+	// ?reveal=1 is accepted and returns the same task.
+	revealed := task
 	resp = request(t, ts.Client(), http.MethodGet,
 		fmt.Sprintf("%s/v1/tasks/%d?reveal=1", ts.URL, created.Data[0].ID), nil)
-	decode(t, resp, &task)
-	if task.Data.Args.Values[0][1] != "hunter2" {
-		t.Errorf("revealed task arg = %q", task.Data.Args.Values[0][1])
+	decode(t, resp, &revealed)
+	if !reflect.DeepEqual(revealed, task) {
+		t.Errorf("reveal=1 changed the task:\n got %+v\nwant %+v", revealed.Data, task.Data)
 	}
-	if task.Data.Prev["InternetGatewayDevice.ManagementServer.Password"][0] != "oldsecret" {
-		t.Errorf("revealed prev = %q", task.Data.Prev["InternetGatewayDevice.ManagementServer.Password"][0])
+}
+
+func TestSSETaskFramesCarryRawValues(t *testing.T) {
+	st := testStore(t)
+	_, ts, _ := newTestServer(t, st)
+	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := time.AfterFunc(15*time.Second, cancel)
+	defer stop.Stop()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		ts.URL+"/v1/events?type=task&device_id=00259E-HG8145V5-SER1&last_event_id=t0:0", nil)
+	if err != nil {
+		t.Fatal(err)
 	}
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream = %d", resp.StatusCode)
+	}
+
+	created := request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/tasks",
+		map[string]any{"name": "set", "args": map[string]any{"values": [][]string{
+			{"InternetGatewayDevice.ManagementServer.Password", "sse-hunter2", "xsd:string"},
+		}}})
+	created.Body.Close()
+	if created.StatusCode != http.StatusAccepted {
+		t.Fatalf("create = %d", created.StatusCode)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	var event string
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			event = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: ") && event == "task":
+			var frame struct {
+				Args struct {
+					Values [][]string `json:"values"`
+				} `json:"args"`
+			}
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &frame); err != nil {
+				t.Fatalf("task frame: %v", err)
+			}
+			if len(frame.Args.Values) == 0 || frame.Args.Values[0][1] != "sse-hunter2" {
+				t.Fatalf("task frame args = %+v, want the raw value", frame.Args.Values)
+			}
+			return
+		}
+	}
+	t.Fatalf("no task frame before the stream ended: %v", scanner.Err())
 }
 
 func TestCancelPendingVsConflict(t *testing.T) {

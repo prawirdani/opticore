@@ -52,7 +52,7 @@ func freshness(last time.Time, interval int, now time.Time) string {
 	return "offline"
 }
 
-func (s *Server) deviceView(d store.Device, now time.Time, reveal bool) deviceJSON {
+func (s *Server) deviceView(d store.Device, now time.Time) deviceJSON {
 	return deviceJSON{
 		ID:              d.ID,
 		Serial:          d.Serial,
@@ -70,12 +70,8 @@ func (s *Server) deviceView(d store.Device, now time.Time, reveal bool) deviceJS
 	}
 }
 
-func paramView(path string, p store.Param, reveal bool) paramJSON {
-	v := p.Value
-	if p.Secret || (!reveal && store.IsSecretPath(path)) {
-		v = "••••"
-	}
-	return paramJSON{Value: v, Type: p.Type, Writable: p.Writable, UpdatedAt: p.UpdatedAt}
+func paramView(p store.Param) paramJSON {
+	return paramJSON{Value: p.Value, Type: p.Type, Writable: p.Writable, UpdatedAt: p.UpdatedAt}
 }
 
 func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +102,7 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	out := make([]deviceJSON, 0, len(devices))
 	for _, d := range devices {
-		out = append(out, s.deviceView(d, now, false))
+		out = append(out, s.deviceView(d, now))
 	}
 	var next *string
 	if len(devices) == limit {
@@ -120,16 +116,15 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
-	reveal := revealRequested(r)
 	d, err := s.st.GetDevice(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.deviceError(w, err)
 		return
 	}
-	out := s.deviceView(d, time.Now(), reveal)
+	out := s.deviceView(d, time.Now())
 	params := make(map[string]paramJSON, len(d.Params))
 	for path, p := range d.Params {
-		params[path] = paramView(path, p, reveal)
+		params[path] = paramView(p)
 	}
 	out.Params = &params
 	summary, err := s.st.TaskSummary(r.Context(), d.ID)
@@ -147,7 +142,6 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listParams(w http.ResponseWriter, r *http.Request) {
-	reveal := revealRequested(r)
 	d, err := s.st.GetDevice(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.deviceError(w, err)
@@ -167,7 +161,7 @@ func (s *Server) listParams(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]paramEntry, 0, len(paths))
 	for _, path := range paths {
-		out = append(out, paramEntry{Path: path, paramJSON: paramView(path, d.Params[path], reveal)})
+		out = append(out, paramEntry{Path: path, paramJSON: paramView(d.Params[path])})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
 }
@@ -179,7 +173,6 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "VALIDATION", "invalid task status")
 		return
 	}
-	reveal := revealRequested(r)
 	tasks, err := s.st.ListTasksFiltered(r.Context(), r.PathValue("id"), status, clampLimit(q.Get("limit"), 100))
 	if err != nil {
 		s.deviceError(w, err)
@@ -187,7 +180,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]taskJSON, 0, len(tasks))
 	for _, t := range tasks {
-		out = append(out, s.taskView(t, reveal))
+		out = append(out, s.taskView(t))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
 }

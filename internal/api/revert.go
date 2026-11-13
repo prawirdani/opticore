@@ -29,7 +29,7 @@ func (s *Server) revertTask(w http.ResponseWriter, r *http.Request) {
 	}
 	views := make([]taskJSON, 0, len(out))
 	for _, t := range out {
-		views = append(views, s.taskView(t, false))
+		views = append(views, s.taskView(t))
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"data": views})
 }

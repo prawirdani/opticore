@@ -256,11 +256,11 @@ the result into the task:
 Any state other than `Complete` fails the task; a ping that never completes
 expires with the task.
 
-A leaf whose last segment ends in `password`, `passphrase`, `secret`, `psk` or
-`key` (case-insensitive, `ParameterKey` excepted) is a secret. Secrets are
-stored as written, like GenieACS does, and the API returns them as `••••`
-unless the request carries `?reveal=1`. The database holds them in clear text,
-so treat a dump or a backup of it as a secret document.
+Nothing is masked. Values written to `password`, `passphrase`, `secret`, `psk`
+or `key` leaves — PPPoE passwords, WiFi keys — and the connection-request
+password are stored and returned as written, the way GenieACS does it. Treat a
+database dump, a backup or a replica as a secret document, and keep `/v1` on a
+network you trust; an old `?reveal=1` still parses and does nothing.
 
 Task statuses: `pending`, `running`, `done`, `failed`, `unknown`, `cancelled`,
 `expired`.
@@ -342,14 +342,14 @@ proxy.
 
 ```go
 page, err := c.ListDevices(ctx, client.ListDevicesOptions{ProductClass: "HG8145V5", Limit: 50})
-dev, err := c.GetDevice(ctx, "48575443BD7589AB", false) // id or serial; reveal=false
+dev, err := c.GetDevice(ctx, "48575443BD7589AB") // id or serial
 params, err := c.ListParams(ctx, dev.ID, "InternetGatewayDevice.WANDevice.", false)
 tasks, err := c.ListTasks(ctx, dev.ID, client.ListTasksOptions{Status: "failed"})
 events, err := c.ListEvents(ctx, dev.ID, client.ListEventsOptions{Limit: 20})
 ```
 
 A device id is `OUI-ProductClass-Serial`; a bare serial is accepted everywhere.
-`Param.Value` for a secret leaf is `••••` unless the call passes `reveal=true`.
+Every value comes back as stored; there is nothing to reveal.
 
 ### Write
 
@@ -467,7 +467,8 @@ A task that ended with a CWMP fault has `Task.Fault() *client.Fault` carrying
 ## HTTP API
 
 There is no authentication on `/v1`: whatever can reach `OPTICORE_API_ADDR`
-can read devices, queue tasks, reveal secrets and factory-reset hardware. Treat
+can read devices, queue tasks, read every stored secret and factory-reset
+hardware. Treat
 the listener address as the access control — bind it to the interface your
 provisioning system uses, and keep it off any network with devices or end users
 on it. The CWMP listener and the API are separate addresses for this reason.
@@ -478,7 +479,7 @@ a retry returns the original rows instead of enqueueing again.
 | Method and path | Purpose |
 |---|---|
 | `GET /v1/devices` | list; `serial_prefix`, `product_class`, `limit`, `cursor` |
-| `GET /v1/devices/{id}` | one device; `?reveal=1` for secrets |
+| `GET /v1/devices/{id}` | one device |
 | `GET /v1/devices/{id}/params?prefix=P` | cached parameters under a prefix |
 | `GET /v1/devices/{id}/tasks` | task log; `status`, `limit` |
 | `GET /v1/devices/{id}/events` | events; `before`, `limit` |
@@ -582,8 +583,7 @@ Facts shown: serial, product class, software version, inform age (`fresh` within
 two inform intervals, `stale` within six, `offline` beyond), last address,
 whether connection-request credentials are set, cached parameters one level at
 a time, tasks with fault codes, events, and jobs with their per-device
-failures. Secrets never reach the screen: cached secret leaves are stored as a
-marker, so the console shows `••••`.
+failures, including the values of secret leaves as stored.
 
 Reboot and factory reset queue ordinary tasks through the same validation as
 the API, which also wakes the device.
@@ -608,15 +608,16 @@ still queues; a confirm says so.
   HTTP Digest (MD5, `qop=auth`, stateless signed nonces) or Basic. Set the same
   pair in the ONTs' `ManagementServer.Username` / `Password`.
 - **`/v1` has no authentication.** The API listener can read devices, queue
-  tasks, reveal secrets and factory-reset hardware, so `OPTICORE_API_ADDR` is
+  tasks, read every stored secret and factory-reset hardware, so
+  `OPTICORE_API_ADDR` is
   the access control: bind it to the interface your provisioning system uses,
   never to a network with devices or end users on it, and prefer a private
   address over `:8081`. Anyone who reaches it is you.
-- **Secrets are not encrypted at rest.** Parameter values written to
+- **Secrets are not hidden at all.** Parameter values written to
   `password|passphrase|secret|psk|key` leaves, and the connection-request
-  password, sit readable in PostgreSQL. The API masks them with `••••` and only
-  `?reveal=1` lifts it, but a database dump, a backup or a replica leaks them.
-  Protect the database the way you would protect the devices' credentials.
+  password, sit readable in PostgreSQL and come back over `/v1` as stored. A
+  database dump, a backup or a replica leaks them, and so does anything that
+  can reach the API. Protect both like the devices' own credentials.
 - A refused wake clears the stored credentials, so the next Inform sets them
   again instead of leaving the device unreachable.
 

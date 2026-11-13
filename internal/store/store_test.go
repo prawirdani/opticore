@@ -186,10 +186,10 @@ func TestRecordInformUpsertAndDedupe(t *testing.T) {
 	if dev.InformInterval != 300 || dev.LastAddr != in.LastAddr || dev.CRURL != in.CRURL {
 		t.Errorf("device inform fields = %+v", dev)
 	}
-	if p := dev.Params["InternetGatewayDevice.ManagementServer.Password"]; !p.Secret || p.Value != "" {
-		t.Errorf("secret param = %+v, want secret marker only", p)
+	if p := dev.Params["InternetGatewayDevice.ManagementServer.Password"]; p.Value != "hunter2" {
+		t.Errorf("password param = %+v, want the stored value", p)
 	}
-	if p := dev.Params["InternetGatewayDevice.ManagementServer.ParameterKey"]; p.Secret || p.Value != "visible" {
+	if p := dev.Params["InternetGatewayDevice.ManagementServer.ParameterKey"]; p.Value != "visible" {
 		t.Errorf("ParameterKey param = %+v, want visible value", p)
 	}
 	if n := count(t, s, `SELECT count(*) FROM events WHERE device_id = $1`, in.ID); n != 2 {

@@ -82,7 +82,7 @@ func TestClientRequests(t *testing.T) {
 	ctx := context.Background()
 
 	page, err := c.ListDevices(ctx, ListDevicesOptions{
-		SerialPrefix: "S", ProductClass: "P", Cursor: "c1", Limit: 2, Reveal: true,
+		SerialPrefix: "S", ProductClass: "P", Cursor: "c1", Limit: 2,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -91,13 +91,13 @@ func TestClientRequests(t *testing.T) {
 		t.Errorf("page = %+v", page)
 	}
 
-	if d, err := c.GetDevice(ctx, "d1", true); err != nil || d.Params["A"].Value != "v" {
+	if d, err := c.GetDevice(ctx, "d1"); err != nil || d.Params["A"].Value != "v" {
 		t.Errorf("GetDevice = %+v, %v", d, err)
 	}
-	if ps, err := c.ListParams(ctx, "d1", "X.", true); err != nil || len(ps) != 1 || ps[0].Path != "A" {
+	if ps, err := c.ListParams(ctx, "d1", "X."); err != nil || len(ps) != 1 || ps[0].Path != "A" {
 		t.Errorf("ListParams = %+v, %v", ps, err)
 	}
-	if ts, err := c.ListTasks(ctx, "d1", ListTasksOptions{Status: "done", Limit: 5, Reveal: true}); err != nil ||
+	if ts, err := c.ListTasks(ctx, "d1", ListTasksOptions{Status: "done", Limit: 5}); err != nil ||
 		len(ts) != 1 || ts[0].Status != "done" {
 		t.Errorf("ListTasks = %+v, %v", ts, err)
 	}
@@ -114,7 +114,7 @@ func TestClientRequests(t *testing.T) {
 	if err != nil || len(tasks) != 1 || tasks[0].ID != 7 {
 		t.Fatalf("CreateTasks = %+v, %v", tasks, err)
 	}
-	if task, err := c.GetTask(ctx, 7, true); err != nil || task.Name != "reboot" {
+	if task, err := c.GetTask(ctx, 7); err != nil || task.Name != "reboot" {
 		t.Errorf("GetTask = %+v, %v", task, err)
 	}
 	if err := c.CancelTask(ctx, "d1", 7); err != nil {
@@ -158,12 +158,12 @@ func TestClientRequests(t *testing.T) {
 		byPath[call.method+" "+call.path] = call
 	}
 	for key, want := range map[string]string{
-		"GET /v1/devices":           "cursor=c1&limit=2&product_class=P&reveal=1&serial_prefix=S",
-		"GET /v1/devices/d1":        "reveal=1",
-		"GET /v1/devices/d1/params": "prefix=X.&reveal=1",
-		"GET /v1/devices/d1/tasks":  "limit=5&reveal=1&status=done",
+		"GET /v1/devices":           "cursor=c1&limit=2&product_class=P&serial_prefix=S",
+		"GET /v1/devices/d1":        "",
+		"GET /v1/devices/d1/params": "prefix=X.",
+		"GET /v1/devices/d1/tasks":  "limit=5&status=done",
 		"GET /v1/devices/d1/events": "before=2026-11-13T10%3A00%3A00Z&limit=3",
-		"GET /v1/tasks/7":           "reveal=1",
+		"GET /v1/tasks/7":           "",
 		"GET /v1/jobs":              "limit=3",
 	} {
 		call, ok := byPath[key]
@@ -203,7 +203,7 @@ func TestErrorDecoding(t *testing.T) {
 	defer srv.Close()
 	c, _ := New(srv.URL)
 
-	_, err := c.GetDevice(context.Background(), "x", false)
+	_, err := c.GetDevice(context.Background(), "x")
 	var apiErr *Error
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("err = %v, want *Error", err)
@@ -219,7 +219,7 @@ func TestErrorDecoding(t *testing.T) {
 	}))
 	defer plain.Close()
 	c2, _ := New(plain.URL)
-	_, err = c2.GetDevice(context.Background(), "x", false)
+	_, err = c2.GetDevice(context.Background(), "x")
 	if !errors.As(err, &apiErr) || apiErr.Status != 502 || apiErr.Message != "upstream down" {
 		t.Errorf("plain error = %+v", err)
 	}

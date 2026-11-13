@@ -33,7 +33,6 @@ type Param struct {
 	Value     string     `json:"value,omitempty"`
 	Type      string     `json:"type,omitempty"`
 	Writable  *bool      `json:"writable,omitempty"`
-	Secret    bool       `json:"secret,omitempty"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
 

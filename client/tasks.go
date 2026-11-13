@@ -111,12 +111,12 @@ func (c *Client) CreateTasks(ctx context.Context, deviceID string, tasks []Task,
 }
 
 // GetTask returns one task by id.
-func (c *Client) GetTask(ctx context.Context, taskID int64, reveal bool) (*Task, error) {
+func (c *Client) GetTask(ctx context.Context, taskID int64) (*Task, error) {
 	var out struct {
 		Data Task `json:"data"`
 	}
 	if err := c.do(ctx, http.MethodGet, []string{"tasks", strconv.FormatInt(taskID, 10)},
-		revealQuery(reveal), nil, nil, &out); err != nil {
+		nil, nil, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out.Data, nil

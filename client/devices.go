@@ -14,7 +14,6 @@ type ListDevicesOptions struct {
 	ProductClass string
 	Cursor       string
 	Limit        int
-	Reveal       bool
 }
 
 // DevicePage is one page of GET /v1/devices.
@@ -39,9 +38,6 @@ func (c *Client) ListDevices(ctx context.Context, opt ListDevicesOptions) (Devic
 	if opt.Limit > 0 {
 		q.Set("limit", strconv.Itoa(opt.Limit))
 	}
-	if opt.Reveal {
-		q.Set("reveal", "1")
-	}
 	var out struct {
 		Data []Device `json:"data"`
 		Meta struct {
@@ -56,11 +52,11 @@ func (c *Client) ListDevices(ctx context.Context, opt ListDevicesOptions) (Devic
 }
 
 // GetDevice returns one device, including its parameter cache and task counts.
-func (c *Client) GetDevice(ctx context.Context, id string, reveal bool) (*Device, error) {
+func (c *Client) GetDevice(ctx context.Context, id string) (*Device, error) {
 	var out struct {
 		Data Device `json:"data"`
 	}
-	if err := c.do(ctx, http.MethodGet, []string{"devices", id}, revealQuery(reveal), nil, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, []string{"devices", id}, nil, nil, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out.Data, nil
@@ -68,8 +64,8 @@ func (c *Client) GetDevice(ctx context.Context, id string, reveal bool) (*Device
 
 // ListParams returns the cached parameters of a device, optionally under a
 // prefix.
-func (c *Client) ListParams(ctx context.Context, id, prefix string, reveal bool) ([]Param, error) {
-	q := revealQuery(reveal)
+func (c *Client) ListParams(ctx context.Context, id, prefix string) ([]Param, error) {
+	q := url.Values{}
 	if prefix != "" {
 		q.Set("prefix", prefix)
 	}
@@ -86,12 +82,11 @@ func (c *Client) ListParams(ctx context.Context, id, prefix string, reveal bool)
 type ListTasksOptions struct {
 	Status string
 	Limit  int
-	Reveal bool
 }
 
 // ListTasks returns the tasks of one device, newest first.
 func (c *Client) ListTasks(ctx context.Context, deviceID string, opt ListTasksOptions) ([]Task, error) {
-	q := revealQuery(opt.Reveal)
+	q := url.Values{}
 	if opt.Status != "" {
 		q.Set("status", opt.Status)
 	}
@@ -134,12 +129,4 @@ func (c *Client) ListEvents(ctx context.Context, deviceID string, opt ListEvents
 // DeleteDevice forgets a device. It registers again on its next Inform.
 func (c *Client) DeleteDevice(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodDelete, []string{"devices", id}, nil, nil, nil, nil)
-}
-
-func revealQuery(reveal bool) url.Values {
-	q := url.Values{}
-	if reveal {
-		q.Set("reveal", "1")
-	}
-	return q
 }

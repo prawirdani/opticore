@@ -77,11 +77,6 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// revealRequested reports whether ?reveal=1 asks for unmasked secret values.
-func revealRequested(r *http.Request) bool {
-	return r.URL.Query().Get("reveal") == "1"
-}
-
 type errorBody struct {
 	Error struct {
 		Code    string         `json:"code"`

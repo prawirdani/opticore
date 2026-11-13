@@ -343,8 +343,8 @@ func TestBootstrapSetsConnectionRequestCredentials(t *testing.T) {
 	if d.CRSetAt == nil || d.CRUsername == "" || d.CRPassword == "" {
 		t.Fatalf("CR credentials not stored: %+v", d)
 	}
-	if p := d.Params["InternetGatewayDevice.ManagementServer.ConnectionRequestPassword"]; !p.Secret || p.Value != "" {
-		t.Errorf("inform password cached as %+v, want secret marker only", p)
+	if p := d.Params["InternetGatewayDevice.ManagementServer.ConnectionRequestPassword"]; p.Value != "leaked" {
+		t.Errorf("inform password cached as %+v, want the raw value", p)
 	}
 	if d.InformInterval != 300 || d.SoftwareVersion != "V5R020C10S271" || d.LastAddr == "" {
 		t.Errorf("device facts = %+v", d)

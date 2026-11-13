@@ -421,9 +421,6 @@ func cmdDevices(ctx context.Context, args []string) error {
 			return err
 		}
 		if *asJSON {
-			for i := range ds {
-				redact(&ds[i])
-			}
 			return printJSON(ds)
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
@@ -438,12 +435,6 @@ func cmdDevices(ctx context.Context, args []string) error {
 		}
 		return w.Flush()
 	})
-}
-
-func redact(d *store.Device) {
-	if d.CRPassword != "" {
-		d.CRPassword = "••••"
-	}
 }
 
 func cmdDevice(ctx context.Context, args []string) error {
@@ -462,7 +453,6 @@ func cmdDevice(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		redact(&d)
 		for k := range d.Params {
 			if !strings.HasPrefix(k, *prefix) {
 				delete(d.Params, k)
@@ -486,9 +476,6 @@ func cmdDevice(ctx context.Context, args []string) error {
 		for _, k := range keys {
 			p := d.Params[k]
 			v := p.Value
-			if p.Secret {
-				v = "••••"
-			}
 			fmt.Printf("  %s = %s (%s)\n", k, v, p.Type)
 		}
 		return nil

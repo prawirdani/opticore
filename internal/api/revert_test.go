@@ -93,8 +93,8 @@ func TestRevertTaskAPI(t *testing.T) {
 	if strings.Contains(string(got.Args), "enc:") {
 		t.Errorf("revert args still sealed: %s", got.Args)
 	}
-	if body.Data[0].Args.Values[0][1] != "••••" {
-		t.Errorf("response args = %+v, want the secret masked", body.Data[0].Args.Values)
+	if body.Data[0].Args.Values[0][1] != "oldsecret" {
+		t.Errorf("response args = %+v, want the stored value", body.Data[0].Args.Values)
 	}
 
 	// Idempotency-Key replays the same revert task.

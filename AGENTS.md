@@ -46,7 +46,7 @@ GenieACS owns `7547`; the built-in defaults are still `7547`/`8081`.
 - `internal/hook` — the daemon's side of the hook call.
 - `internal/api` — `/v1` handlers and SSE. No auth: the listener address is the
   boundary.
-- `internal/store` — hand-written SQL, `IsSecretPath`, migrations runner.
+- `internal/store` — hand-written SQL, migrations runner.
 - `internal/tui` — operator console over `Deps` interfaces; no SQL of its own,
   writes go through `acs.Service`. Its tests are pure (fake readers), so they
   run under plain `make test`.
@@ -63,9 +63,8 @@ GenieACS owns `7547`; the built-in defaults are still `7547`/`8081`.
   `<string>` arrays, `OUI-ProductClass-Serial`). Never use `encoding/xml` in the
   production path; it is only the test oracle for the hand-written scanner.
 - Leaves ending in `password|passphrase|secret|psk|key` are secrets. They are
-  stored as written (no encryption at rest, by decision) and masked to `••••`
-  on every read unless the request asks `reveal=1`; masking is by
-  `store.IsSecretPath`. Do not log them.
+  stored and served as written (no encryption, no masking, by decision), so a
+  database dump or a `/v1` response leaks them. Do not log them.
 - Handler calls for one session are sequential, and at most one RPC is in
   flight. Do not add per-session goroutines.
 - One daemon per database, enforced by a PostgreSQL advisory lock. Never start

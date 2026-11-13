@@ -53,7 +53,11 @@ func (s *Store) RecordInform(ctx context.Context, in InformRecord) (Device, []Ta
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	params, err := encodeParams(in.Params)
+	p := in.Params
+	if p == nil {
+		p = map[string]Param{}
+	}
+	params, err := json.Marshal(p)
 	if err != nil {
 		return Device{}, nil, fmt.Errorf("store: encode params: %w", err)
 	}
@@ -187,7 +191,7 @@ func (s *Store) ListDevices(ctx context.Context, f ListFilter) ([]Device, error)
 
 // MergeParams merges parameter leaves into the device's cache.
 func (s *Store) MergeParams(ctx context.Context, deviceID string, params map[string]Param) error {
-	b, err := encodeParams(params)
+	b, err := json.Marshal(params)
 	if err != nil {
 		return fmt.Errorf("store: encode params: %w", err)
 	}
