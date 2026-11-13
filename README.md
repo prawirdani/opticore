@@ -51,10 +51,57 @@ inventory, and not a ZTP server. Those belong on top.
 - The CWMP listener must be reachable by the devices, and it should sit on an
   isolated management VLAN (see [Security](#security)).
 
-## Quick start
+## Install
+
+Three ways in; each gives one binary or one image. Commands below use
+`opticore` for the binary you ended up with.
+
+### Prebuilt binary
+
+Each release carries static binaries for `linux`, `darwin` and `windows`, on
+`amd64` and `arm64`, plus `checksums.txt`:
 
 ```sh
-# minimal configuration
+ver=v1.2.3   # the release you want
+curl -LO "https://github.com/prawirdani/opticore/releases/download/$ver/opticore_${ver}_linux_amd64"
+curl -LO "https://github.com/prawirdani/opticore/releases/download/$ver/checksums.txt"
+sha256sum -c checksums.txt --ignore-missing
+chmod +x "opticore_${ver}_linux_amd64"
+sudo mv "opticore_${ver}_linux_amd64" /usr/local/bin/opticore
+opticore version
+```
+
+Nothing else is needed at runtime: the binary is static, and migrations are
+embedded.
+
+### From source
+
+```sh
+git clone https://github.com/prawirdani/opticore
+cd opticore
+make build            # bin/opticore, version from git describe
+./bin/opticore version
+```
+
+Go 1.26 or newer is the only build dependency.
+
+### Container
+
+```sh
+docker run --rm -p 7547:7547 -p 8081:8081 \
+  -e OPTICORE_DB_DSN='postgres://user:pass@db:5432/opticore?sslmode=disable' \
+  -e OPTICORE_SECRET_KEY="$(openssl rand -base64 32)" \
+  ghcr.io/prawirdani/opticore:latest
+```
+
+The image is distroless and runs as non-root, with `serve` as the command, so
+migrations apply at start. It carries CA certificates for an `https` hook URL.
+Mount nothing: all configuration is environment variables. Port `8082` is
+exposed for the file server, which is not implemented yet.
+
+## First run
+
+```sh
 cat > .env <<'ENV'
 OPTICORE_DB_DSN=postgres://postgres:secret@localhost:5432/opticore?sslmode=disable
 OPTICORE_SECRET_KEY=$(openssl rand -base64 32)
@@ -64,16 +111,17 @@ ENV
 
 chmod 600 .env
 set -a; . ./.env; set +a
-
-make build
-./bin/opticore migrate        # schema; `serve` also does this on start
-./bin/opticore serve
+opticore migrate      # schema; `serve` also does this on start
+opticore serve
 ```
+
+With the container, pass those variables with `-e` instead and skip
+`migrate`.
 
 Then create an API token and point a device at the ACS:
 
 ```sh
-./bin/opticore token create ops --scope read,write   # printed once
+opticore token create ops --scope read,write    # printed once
 curl -H 'Authorization: Bearer <token>' localhost:8081/v1/devices
 ```
 
@@ -373,20 +421,6 @@ and nothing else. Pushing that tag:
 - publishes them as a GitHub release;
 - builds and pushes the multi-arch image
   `ghcr.io/<owner>/opticore:<tag>` and `:latest`.
-
-## Container image
-
-```sh
-docker run --rm -p 7547:7547 -p 8081:8081 \
-  -e OPTICORE_DB_DSN='postgres://user:pass@db:5432/opticore?sslmode=disable' \
-  -e OPTICORE_SECRET_KEY="$(openssl rand -base64 32)" \
-  ghcr.io/<owner>/opticore:latest
-```
-
-The image is distroless and runs as non-root, with `serve` as the command, so
-migrations are applied on start. It carries CA certificates for an `https` hook
-URL. Mount nothing; all configuration is environment variables. Port `8082` in
-`EXPOSE` is reserved for the file server and is not served yet.
 
 ## Not implemented yet
 
