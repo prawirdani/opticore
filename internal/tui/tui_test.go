@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -513,3 +514,89 @@ func TestQuitKeys(t *testing.T) {
 }
 
 func intp(n int) *int { return &n }
+
+func TestDetailHeaderIsAlignedTable(t *testing.T) {
+	dev := device(1)
+	dev.FirstInform = testNow.Add(-40 * time.Hour)
+	dev.CRSetAt = &testNow
+	dev.PendingReboot = true
+	dev.LastFault = json.RawMessage(`{"code":9002,"message":"` + strings.Repeat("fault detail ", 30) + `"}`)
+	f := &fake{devices: []store.Device{dev}}
+
+	for _, width := range []int{80, 130} {
+		t.Run(fmt.Sprintf("width %d", width), func(t *testing.T) {
+			m := newTestModel(f)
+			m.w = width
+			m = settle(t, m, m.Init()())
+			m = press(t, m, keyEnter)
+			if m.screen != scrDevice {
+				t.Fatalf("enter did not open the device: %v", m.screen)
+			}
+
+			rows := m.factRows()
+			lines := m.detailFacts()
+			if len(lines) != len(rows) {
+				t.Fatalf("%d lines for %d facts", len(lines), len(rows))
+			}
+
+			labelWidth := 0
+			for _, r := range rows {
+				if n := lipgloss.Width(r[0]); n > labelWidth {
+					labelWidth = n
+				}
+			}
+			labelWidth++ // the gutter cell
+
+			for i, line := range lines {
+				if got := lipgloss.Width(line); got > width {
+					t.Fatalf("fact line %d is %d wide, terminal is %d: %q", i, got, width, line)
+				}
+				plain := stripANSI(line)
+				label := rows[i][0] + strings.Repeat(" ", labelWidth-lipgloss.Width(rows[i][0]))
+				if !strings.HasPrefix(plain, label) {
+					t.Errorf("fact %q does not start in the label column: %q", rows[i][0], plain)
+					continue
+				}
+				want := stripANSI(clip(rows[i][1], width-labelWidth))
+				if got := plain[len(label):]; got != want {
+					t.Errorf("fact %q: value column %q, want %q", rows[i][0], got, want)
+				}
+			}
+
+			last := stripANSI(lines[len(lines)-1])
+			if !strings.HasSuffix(last, "…") {
+				t.Fatalf("a value too wide for the column was not ellipsised: %q", last)
+			}
+
+			for i, line := range strings.Split(m.View(), "\n") {
+				if got := lipgloss.Width(line); got > width {
+					t.Fatalf("rendered line %d is %d wide, terminal is %d: %q", i, got, width, line)
+				}
+			}
+		})
+	}
+}
+
+// stripANSI removes SGR sequences so a test can talk about columns in bytes.
+func stripANSI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b {
+			j := i + 1
+			if j < len(s) && s[j] == '[' {
+				j++
+				for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
+					j++
+				}
+				if j < len(s) {
+					j++
+				}
+			}
+			i = j
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}

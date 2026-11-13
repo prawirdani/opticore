@@ -206,6 +206,34 @@ func tableHeader(cols []column, widths []int) string {
 	return stHead.Render(tableRow(cells, widths))
 }
 
+// labelTable lays pairs out as an aligned two-column table: the label column
+// is sized from the longest label, the value column takes the rest, and a
+// value that does not fit is clipped with an ellipsis, never wrapped.
+func labelTable(rows [][2]string, w int) []string {
+	if len(rows) == 0 || w <= 0 {
+		return nil
+	}
+	lw := 0
+	for _, r := range rows {
+		if n := lipgloss.Width(r[0]); n > lw {
+			lw = n
+		}
+	}
+	lw++ // one gutter cell between the label and its value
+	if lw > w {
+		lw = w
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		line := cell(stMuted.Render(r[0]), lw)
+		if rest := w - lw; rest > 0 {
+			line += clip(r[1], rest)
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
 // cursor is a list position. The window is derived from pos and the available
 // height, so a refresh that shortens the list cannot leave a stale offset.
 type cursor struct{ pos int }

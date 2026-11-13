@@ -236,7 +236,9 @@ func (m model) detailBody(h int) []string {
 	return append(out, tail...)
 }
 
-func (m model) detailFacts() []string {
+// factRows is the device header, one fact per row. Keeping the pairs apart
+// from the rendering lets the label column be sized from the labels.
+func (m model) factRows() [][2]string {
 	d := m.det.device
 	now := m.now()
 	interval := d.InformInterval
@@ -247,25 +249,33 @@ func (m model) detailFacts() []string {
 	if d.CRSetAt != nil {
 		cr = "credentials ready"
 	}
-	extra := ""
+	reboot := "no"
 	if d.PendingReboot {
-		extra += " · reboot pending"
+		reboot = "pending"
+	}
+	rows := [][2]string{
+		{"id", dash(d.ID)},
+		{"serial", dash(d.Serial)},
+		{"product", dash(d.ProductClass)},
+		{"software", dash(d.SoftwareVersion)},
+		{"oui", dash(d.OUI)},
+		{"seen", age(now.Sub(d.LastInform)) + " (" + freshness(d.LastInform, d.InformInterval, now) + ")"},
+		{"interval", fmt.Sprintf("%ds", interval)},
+		{"first", stamp(d.FirstInform)},
+		{"addr", dash(d.LastAddr)},
+		{"cr", cr},
+		{"reboot", reboot},
 	}
 	if len(d.LastFault) > 0 && string(d.LastFault) != "null" {
-		extra += " · last fault " + string(d.LastFault)
+		rows = append(rows, [2]string{"last fault", string(d.LastFault)})
 	}
-	lines := []string{
-		kv("id", d.ID) + "   " + kv("serial", dash(d.Serial)),
-		kv("product", dash(d.ProductClass)) + "   " + kv("software", dash(d.SoftwareVersion)) + "   " + kv("oui", dash(d.OUI)),
-		kv("seen", age(now.Sub(d.LastInform))+" ("+freshness(d.LastInform, d.InformInterval, now)+")") +
-			"   " + kv("interval", fmt.Sprintf("%ds", interval)) +
-			"   " + kv("first", stamp(d.FirstInform)),
-		kv("addr", dash(d.LastAddr)) + "   " + kv("cr", cr) + extra,
-	}
-	for i := range lines {
-		lines[i] = clip(lines[i], m.w)
-	}
-	return lines
+	return rows
+}
+
+// detailFacts renders the header as an aligned two-column table, so a fact
+// never collides with its neighbour and every value starts at one x.
+func (m model) detailFacts() []string {
+	return labelTable(m.factRows(), m.w)
 }
 
 func kv(k, v string) string {
