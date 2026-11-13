@@ -11,6 +11,10 @@ make itest                    # the real suite: needs OPTICORE_TEST_DSN (set in 
 gofmt -l . && go vet ./...   # what CI checks besides the tests
 ```
 
+`./bin/opticore serve -d` detaches and `./bin/opticore stop` shuts it down
+gracefully — no `nohup` and no `pkill`, which can match your own shell. The
+pid file follows `OPTICORE_LOG_FILE`, so both commands agree.
+
 The binary loads `./.env` by itself (`-env-file path` or `OPTICORE_ENV_FILE`
 for another file; real environment variables win). `go test` does **not**, so
 export the variables yourself before a DB suite unless CI-style env is already

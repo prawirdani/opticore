@@ -38,7 +38,8 @@ const usage = `usage: opticore [-env-file path] <command> [args]
   The daemon reads ./.env, or .env beside the binary, unless -env-file (or
   $OPTICORE_ENV_FILE) names another file. Real environment variables win.
 
-  serve                                 run the daemon
+  serve [-d]                            run the daemon; -d detaches it
+  stop                                  stop every running opticore serve
   migrate                               apply database migrations
   tui                                   operator console (also the no-arg default)
   devices [--json] [--serial P] [--class C]
@@ -81,7 +82,7 @@ func main() {
 
 	switch cmd, args := args[0], args[1:]; cmd {
 	case "serve":
-		err = serve(ctx)
+		err = serve(ctx, args)
 	case "migrate":
 		err = withStore(ctx, func(s *store.Store, _ config.Config) error { return s.Migrate(ctx) })
 	case "tui":
@@ -102,6 +103,8 @@ func main() {
 		err = cmdWake(ctx, args)
 	case "logs":
 		err = cmdLogs(ctx, args)
+	case "stop":
+		err = cmdStop(os.Getenv, args)
 	case "token":
 		err = cmdToken(ctx, args)
 	case "version":
@@ -163,10 +166,21 @@ func newLogger(level, path string) (*slog.Logger, func(), error) {
 	return slog.New(slog.NewJSONHandler(f, opts)), func() { f.Close() }, nil
 }
 
-func serve(ctx context.Context) error {
+func serve(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	daemon := fs.Bool("d", false, "run in the background")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: serve [-d]")
+	}
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
 		return err
+	}
+	if *daemon {
+		return serveDaemon(cfg)
 	}
 	log, closeLog, err := newLogger(cfg.LogLevel, cfg.LogFile)
 	if err != nil {
@@ -179,6 +193,14 @@ func serve(ctx context.Context) error {
 		return err
 	}
 	defer st.Close()
+	pidPath := pidFile(os.Getenv)
+	if pid := livePID(pidPath); pid != 0 && pid != os.Getpid() {
+		return errAlreadyRunning(pid)
+	}
+	if err := writePID(pidPath); err != nil {
+		return err
+	}
+	defer removePID(pidPath)
 	st.TaskExpiry = cfg.TaskExpiry
 	if _, err := st.AcquireLeader(ctx); err != nil {
 		return err

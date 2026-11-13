@@ -110,8 +110,20 @@ ENV
 
 chmod 600 .env
 opticore migrate      # schema; `serve` also does this on start
-opticore serve
+opticore serve -d     # -d detaches and prints the pid; plain `serve` stays in the foreground
+opticore stop         # graceful shutdown of the running daemon
 ```
+
+`serve` writes a pid file, so `stop` finds the daemon without a pattern match:
+`$OPTICORE_PID_FILE`, else `<OPTICORE_LOG_FILE>.pid`, else `opticore.pid` beside
+the binary. `stop` also scans the process table, so a daemon started before the
+file existed is still found. A second `serve` refuses to start while one is
+running, which the database lock would enforce anyway; the pid file turns it
+into a message.
+
+`serve -d` hands the terminal back only after the daemon is listening. When
+`OPTICORE_LOG_FILE` is unset, `-d` says so and discards the output, so set it
+before detaching if you want to keep the logs.
 
 The CLI loads `./.env` itself; no `source` step. Point it elsewhere with
 `-env-file /etc/opticore/.env` (or `OPTICORE_ENV_FILE`), which every subcommand
@@ -197,6 +209,7 @@ unit, a container, or a one-off `FOO=1 opticore serve` behaves as written.
 | `OPTICORE_EVENT_RETENTION` | `720h` | events older than this are deleted |
 | `OPTICORE_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `OPTICORE_LOG_FILE` | empty | append JSON logs to this file instead of stderr, which is what `opticore logs` and the console's logs tab read |
+| `OPTICORE_PID_FILE` | derived | where `serve` records its pid; defaults to `<OPTICORE_LOG_FILE>.pid`, else `opticore.pid` beside the binary |
 
 ## How a session works
 
@@ -531,7 +544,8 @@ job is cancelled or done. `device_id=` leaves job frames out.
 
 ```
 opticore [-env-file path] <command>            path defaults to ./.env
-opticore serve                                 run the daemon
+opticore serve [-d]                            run the daemon; -d detaches it
+opticore stop                                  stop every running opticore serve
 opticore migrate                               apply migrations
 opticore devices [--serial P] [--class C]      list devices
 opticore device <serial|id> [--prefix P]       one device and its parameters
