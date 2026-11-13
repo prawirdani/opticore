@@ -51,7 +51,8 @@ const usage = `usage: opticore [-env-file path] <command> [args]
   job <id> [--json]
   job cancel <id>
   job revert <id>                       revert every done set task of the job
-  wake <serial|id>
+  wake <serial|id>                      connection request only
+  summon <serial|id>                    wake plus a whole-tree get (GenieACS Summon)
   version                               print the build version
 `
 
@@ -96,6 +97,8 @@ func main() {
 		err = cmdJob(ctx, args)
 	case "wake":
 		err = cmdWake(ctx, args)
+	case "summon":
+		err = cmdSummon(ctx, args)
 	case "version":
 		fmt.Println(version)
 	case "-h", "--help", "help":
@@ -723,6 +726,23 @@ func cmdJob(ctx context.Context, args []string) error {
 			}
 		}
 		return nil
+	})
+}
+
+// cmdSummon queues a root get and wakes the device: the GenieACS Summon, which
+// is a connection request followed by a full-tree refresh. Queueing the task
+// already sends the request, so there is no separate wake.
+func cmdSummon(ctx context.Context, args []string) error {
+	if len(args) != 1 {
+		return errors.New("usage: summon <serial|id>")
+	}
+	return withStore(ctx, func(st *store.Store, cfg config.Config) error {
+		svc := service(st, cfg)
+		out, err := svc.Enqueue(ctx, args[0], []store.NewTask{{Name: "get"}})
+		if err != nil {
+			return err
+		}
+		return queued(ctx, svc, out)
 	})
 }
 

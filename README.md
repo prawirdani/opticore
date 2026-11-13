@@ -237,8 +237,10 @@ is the only TR-181 case not covered, and nothing in the fleet has it.
 followed by a whole-tree refresh; Opticore has the same two halves and no
 separate command. `opticore task <serial> get` with no paths queues that
 refresh, and queueing it wakes the device, so the `get` runs inside the session
-the connection request opened. Wake alone (`POST .../wake`, `w` in the console)
-only asks the device to call in; it reads nothing.
+the connection request opened: `opticore summon <serial|id>` is that one call,
+and `f` on the console's device screen queues the same task after a `y/n`.
+Wake alone (`POST .../wake`, `w` in the console) only asks the device to call
+in; it reads nothing.
 
 ## Tasks
 
@@ -563,7 +565,8 @@ opticore task <serial|id> reboot
 opticore task <serial|id> ping <host>
 opticore task <serial|id> revert <taskId>
 opticore jobs | job <id> | job cancel <id> | job revert <id>
-opticore wake <serial|id>
+opticore wake <serial|id>                      connection request only
+opticore summon <serial|id>                    wake plus a whole-tree get
 opticore version
 opticore tui                                   operator console (also the no-arg default)
 ```
