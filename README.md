@@ -62,7 +62,7 @@ Each release carries static binaries for `linux`, `darwin` and `windows`, on
 `amd64` and `arm64`, plus `checksums.txt`:
 
 ```sh
-ver=v0.1.0   # the release you want
+ver=v0.2.0   # the release you want
 curl -LO "https://github.com/prawirdani/opticore/releases/download/$ver/opticore_${ver}_linux_amd64"
 curl -LO "https://github.com/prawirdani/opticore/releases/download/$ver/checksums.txt"
 sha256sum -c checksums.txt --ignore-missing
@@ -325,7 +325,7 @@ is one request, and everything Opticore decides is decided by the daemon.
 ### Install
 
 ```sh
-go get github.com/prawirdani/opticore@v0.1.0
+go get github.com/prawirdani/opticore@v0.2.0
 ```
 
 The module is versioned with the daemon. Point `go get` at the release the
