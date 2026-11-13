@@ -594,6 +594,7 @@ time is always shown.
 | `s` | cycle the task status filter (tasks screen) |
 | `r` | refresh now; the last refresh time is shown |
 | `w` | wake the selected device, after `y/n` |
+| `f` | fetch every parameter from the open device: queues a root `get` and wakes it, after `y/n` |
 | `b` / `x` | reboot / factory reset the open device, after `y/n` |
 | `1 2 3`, `Tab` | devices, tasks, jobs |
 | `q`, `Ctrl+C` | quit |
