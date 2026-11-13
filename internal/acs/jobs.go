@@ -8,7 +8,7 @@ import (
 	"github.com/prawirdani/opticore/internal/store"
 )
 
-// CreateJob validates and seals the task template, then expands the selector
+// CreateJob validates and stores the task template, then expands the selector
 // into one task per device. It does not wake anyone; call PumpJobs for that.
 func (svc *Service) CreateJob(ctx context.Context, j store.NewJob) (store.Job, []store.Task, error) {
 	if err := svc.prepare(&j.Task); err != nil {

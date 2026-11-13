@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/prawirdani/opticore/internal/store"
 )
@@ -23,8 +22,7 @@ var (
 )
 
 // RevertTask queues one ordinary set task carrying the values the original
-// set overwrote. Sealed prev values are decrypted here and sealed again by
-// Enqueue, so a revert never stores plaintext secrets (§8).
+// set overwrote. The recorded prev values are stored as they were read.
 func (svc *Service) RevertTask(ctx context.Context, idOrSerial string, taskID int64, idemKey *string) ([]store.Task, error) {
 	d, err := svc.Store.GetDevice(ctx, idOrSerial)
 	if err != nil {
@@ -43,7 +41,7 @@ func (svc *Service) RevertTask(ctx context.Context, idOrSerial string, taskID in
 	if t.Status != "done" {
 		return nil, ErrTaskNotDone
 	}
-	args, err := revertArgs(svc.Key, t.Prev)
+	args, err := revertArgs(t.Prev)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +68,7 @@ func (svc *Service) RevertJob(ctx context.Context, jobID int64) (store.Job, []st
 	ids := make([]string, 0, len(tasks))
 	seen := map[string]bool{}
 	for _, t := range tasks {
-		args, err := revertArgs(svc.Key, t.Prev)
+		args, err := revertArgs(t.Prev)
 		if err != nil {
 			return store.Job{}, nil, fmt.Errorf("task %d: %w", t.ID, err)
 		}
@@ -99,9 +97,8 @@ func (svc *Service) RevertJob(ctx context.Context, jobID int64) (store.Job, []st
 	})
 }
 
-// revertArgs turns a stored prev map back into set args, decrypting sealed
-// secret values so Enqueue can seal them with a fresh nonce.
-func revertArgs(key []byte, prev json.RawMessage) (json.RawMessage, error) {
+// revertArgs turns a stored prev map back into set args.
+func revertArgs(prev json.RawMessage) (json.RawMessage, error) {
 	if len(prev) == 0 {
 		return nil, ErrNoPrev
 	}
@@ -120,13 +117,6 @@ func revertArgs(key []byte, prev json.RawMessage) (json.RawMessage, error) {
 	values := make([][]string, 0, len(paths))
 	for _, p := range paths {
 		v, typ := m[p][0], m[p][1]
-		if strings.HasPrefix(v, encPrefix) {
-			plain, err := store.OpenSecret(key, strings.TrimPrefix(v, encPrefix))
-			if err != nil {
-				return nil, fmt.Errorf("decrypt %s: %w", p, err)
-			}
-			v = string(plain)
-		}
 		if typ == "" {
 			typ = "xsd:string"
 		}

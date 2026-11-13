@@ -90,7 +90,6 @@ Go 1.26 or newer is the only build dependency.
 ```sh
 docker run --rm -p 7547:7547 -p 8081:8081 \
   -e OPTICORE_DB_DSN='postgres://user:pass@db:5432/opticore?sslmode=disable' \
-  -e OPTICORE_SECRET_KEY="$(openssl rand -base64 32)" \
   ghcr.io/prawirdani/opticore:latest
 ```
 
@@ -103,27 +102,23 @@ Mount nothing: all configuration is environment variables.
 ```sh
 cat > .env <<ENV
 OPTICORE_DB_DSN=postgres://postgres:secret@localhost:5432/opticore?sslmode=disable
-OPTICORE_SECRET_KEY=$(openssl rand -base64 32)
 CWMP_ADDR=:7547
 OPTICORE_API_ADDR=:8081
 ENV
 
 chmod 600 .env
 opticore migrate      # schema; `serve` also does this on start
-opticore serve -d     # -d detaches and prints the pid; plain `serve` stays in the foreground
-opticore stop         # graceful shutdown of the running daemon
+opticore serve        # foreground process, logs on stderr, Ctrl-C to stop
 ```
 
-`serve` writes a pid file, so `stop` finds the daemon without a pattern match:
-`$OPTICORE_PID_FILE`, else `<OPTICORE_LOG_FILE>.pid`, else `opticore.pid` beside
-the binary. `stop` also scans the process table, so a daemon started before the
-file existed is still found. A second `serve` refuses to start while one is
-running, which the database lock would enforce anyway; the pid file turns it
-into a message.
+`migrate` and `serve` create the database named in the DSN when it does not
+exist, by connecting to `postgres` with the same credentials; the role needs
+`CREATEDB`. Any other connection error stops them as before.
 
-`serve -d` hands the terminal back only after the daemon is listening. When
-`OPTICORE_LOG_FILE` is unset, `-d` says so and discards the output, so set it
-before detaching if you want to keep the logs.
+`serve` is one foreground process, like `genieacs-cwmp`: no daemonising, no pid
+file, no stop command. Run it under systemd, s6, or a container restart policy
+and let that own the lifecycle. A second `serve` on the same database exits
+because of the PostgreSQL advisory lock.
 
 The CLI loads `./.env` itself; no `source` step. Point it elsewhere with
 `-env-file /etc/opticore/.env` (or `OPTICORE_ENV_FILE`), which every subcommand
@@ -160,7 +155,6 @@ unit, a container, or a one-off `FOO=1 opticore serve` behaves as written.
 | Variable | Meaning |
 |---|---|
 | `OPTICORE_DB_DSN` | PostgreSQL DSN, e.g. `postgres://user:pass@host:5432/opticore?sslmode=disable` |
-| `OPTICORE_SECRET_KEY` | base64 of 32 bytes, AES-256-GCM key for secrets at rest. Losing it makes stored secrets unrecoverable |
 
 ### Device-facing listener
 
@@ -203,9 +197,6 @@ unit, a container, or a one-off `FOO=1 opticore serve` behaves as written.
 | `OPTICORE_TASK_MAX_ATTEMPTS` | `5` | retries before a task is left failed |
 | `OPTICORE_TASK_RETENTION` | `720h` | finished tasks older than this are deleted |
 | `OPTICORE_EVENT_RETENTION` | `720h` | events older than this are deleted |
-| `OPTICORE_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
-| `OPTICORE_LOG_FILE` | empty | append JSON logs to this file instead of stderr, which is what `opticore logs` and the console's logs tab read |
-| `OPTICORE_PID_FILE` | derived | where `serve` records its pid; defaults to `<OPTICORE_LOG_FILE>.pid`, else `opticore.pid` beside the binary |
 
 ## How a session works
 
@@ -261,9 +252,10 @@ Any state other than `Complete` fails the task; a ping that never completes
 expires with the task.
 
 A leaf whose last segment ends in `password`, `passphrase`, `secret`, `psk` or
-`key` (case-insensitive, `ParameterKey` excepted) is a secret: it is sealed
-with `OPTICORE_SECRET_KEY` before it reaches the database, and is returned as
-`••••` unless the request carries `?reveal=1`.
+`key` (case-insensitive, `ParameterKey` excepted) is a secret. Secrets are
+stored as written, like GenieACS does, and the API returns them as `••••`
+unless the request carries `?reveal=1`. The database holds them in clear text,
+so treat a dump or a backup of it as a secret document.
 
 Task statuses: `pending`, `running`, `done`, `failed`, `unknown`, `cancelled`,
 `expired`.
@@ -541,8 +533,7 @@ job is cancelled or done. `device_id=` leaves job frames out.
 
 ```
 opticore [-env-file path] <command>            path defaults to ./.env
-opticore serve [-d]                            run the daemon; -d detaches it
-opticore stop                                  stop every running opticore serve
+opticore serve                                 run the daemon in the foreground
 opticore migrate                               apply migrations
 opticore devices [--serial P] [--class C]      list devices
 opticore device <serial|id> [--prefix P]       one device and its parameters
@@ -556,7 +547,6 @@ opticore jobs | job <id> | job cancel <id> | job revert <id>
 opticore wake <serial|id>
 opticore version
 opticore tui                                   operator console (also the no-arg default)
-opticore logs [-n N] [-f]                      tail the daemon log file
 ```
 
 Every listing subcommand takes `--json`. The CLI connects to the database
@@ -566,21 +556,21 @@ directly and never applies DDL except `migrate`.
 
 `opticore tui` (or just `opticore`) opens the operator console when stdin and
 stdout are a terminal; a pipe gets the usage text instead. It reads the local
-database and the daemon log, never talks to a device, and keeps itself current:
-the logs tab reloads every second, the other lists every five seconds, and a
-detail screen only on `r`. The last refresh time is always shown.
+database, never talks to a device, and keeps its lists current on a five-second
+timer; `r` forces it, and a detail screen only reloads on `r`. The last refresh
+time is always shown.
 
 | Key | Action |
 |---|---|
 | `↑ ↓` / `j k`, `g G` | move, jump to ends |
 | `Enter` | open a device or job; expand one parameter level |
-| `Esc` | collapse a level, then back to the device list |
+| `Esc` / `Backspace` | collapse a level, then back to the list; cancel a confirm. While typing a filter, `Backspace` deletes a character |
 | `/` | filter the rows: serial prefix, product class, version, freshness |
 | `s` | cycle the task status filter (tasks screen) |
 | `r` | refresh now; the last refresh time is shown |
 | `w` | wake the selected device, after `y/n` |
 | `b` / `x` | reboot / factory reset the open device, after `y/n` |
-| `1 2 3 4`, `Tab` | devices, tasks, jobs, logs |
+| `1 2 3`, `Tab` | devices, tasks, jobs |
 | `q`, `Ctrl+C` | quit |
 
 Facts shown: serial, product class, software version, inform age (`fresh` within
@@ -590,10 +580,14 @@ a time, tasks with fault codes, events, and jobs with their per-device
 failures. Secrets never reach the screen: cached secret leaves are stored as a
 marker, so the console shows `••••`.
 
-The logs tab shows the daemon's own log, the same lines `opticore logs` prints,
-so it only has content when `OPTICORE_LOG_FILE` is set. Reboot and factory reset
-queue ordinary tasks through the same validation as the API, which also wakes
-the device.
+Reboot and factory reset queue ordinary tasks through the same validation as
+the API, which also wakes the device.
+
+The header shows whether a daemon is serving this database: `● serving`, or
+`✕ daemon not running` on every screen when no `opticore serve` holds the
+database lock. Devices cannot reach the ACS then, so wakes are sent but nothing
+answers, and queued tasks wait for the daemon. The console still works and
+still queues; a confirm says so.
 
 ## Security
 
@@ -613,9 +607,11 @@ the device.
   the access control: bind it to the interface your provisioning system uses,
   never to a network with devices or end users on it, and prefer a private
   address over `:8081`. Anyone who reaches it is you.
-- **Secrets** are AES-256-GCM encrypted at rest and masked unless the request
-  asks for `?reveal=1`. `OPTICORE_SECRET_KEY` is the one thing you must back up
-  alongside the database; without it stored secrets cannot be read back.
+- **Secrets are not encrypted at rest.** Parameter values written to
+  `password|passphrase|secret|psk|key` leaves, and the connection-request
+  password, sit readable in PostgreSQL. The API masks them with `••••` and only
+  `?reveal=1` lifts it, but a database dump, a backup or a replica leaks them.
+  Protect the database the way you would protect the devices' credentials.
 - A refused wake clears the stored credentials, so the next Inform sets them
   again instead of leaving the device unreachable.
 
@@ -630,9 +626,12 @@ the device.
   deletes finished tasks and events past their retention. Pending and running
   tasks are never deleted.
 - `GET /healthz` is served on both listeners.
-- Logs are JSON on stderr. `OPTICORE_LOG_FILE` appends them to a 0600 file
-  instead, which `opticore logs [-n N] [-f]` and the console's logs tab read.
-  `OPTICORE_LOG_LEVEL=debug` adds the auth challenge and hook step detail.
+- Logs go to stderr as plain lines through the standard library `log`
+  package, with the usual timestamp prefix: `2026/11/13 17:00:46 inform
+  device=00259E-HG8145V5-48575443BD7589AB events=[1 BOOT 0 BOOTSTRAP]`. Nothing
+  is persisted; redirect or capture them the way you would any service's
+  stderr. Lines starting `WARN ` or `ERROR ` need attention; `DEBUG ` lines
+  are the device auth challenge.
 
 ## Development
 

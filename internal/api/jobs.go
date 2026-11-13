@@ -95,7 +95,7 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 	}
 	// Creation already expanded to tasks; wake only the first max_parallel.
 	if err := s.svc.PumpJobs(r.Context()); err != nil {
-		s.log.Error("pump jobs after create", "err", err)
+		s.log.Printf("ERROR pump jobs after create err=%v", err)
 	}
 	counts, err := s.st.JobCounts(r.Context(), job.ID)
 	if err != nil {

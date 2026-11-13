@@ -19,7 +19,6 @@ const (
 	scrTasks
 	scrJobs
 	scrJob
-	scrLogs
 )
 
 // limits keep one refresh bounded; the console lists, it does not page.
@@ -30,11 +29,31 @@ const (
 	jobLimit    = 50
 	detailTaskN = 20
 
-	// tickEvery drives the one timer chain; logInterval is that tick, while a
-	// tab reloads only once per tabInterval.
-	tickEvery   = time.Second
-	tabInterval = 5 * time.Second
+	// tickEvery drives the one timer chain; each tick reloads the active tab.
+	tickEvery = 5 * time.Second
 )
+
+// serveState is the daemon's listener state, read as a status line and never
+// as a reload: it must not disturb a filter, cursor, tree or confirmation.
+type serveState int
+
+const (
+	serveUnknown serveState = iota // nil dep, or not checked yet
+	serveUp
+	serveDown
+)
+
+// serveUnknownMark is shown when the status read failed: the state is not
+// known, and the error itself goes to the status line.
+const serveUnknownMark = "? daemon status unknown"
+
+// serveDownAlert is the one line an operator cannot miss: what is down and
+// what it means for the work they just did.
+const serveDownAlert = "✕ daemon not running — devices cannot reach the ACS; wakes and tasks wait"
+
+// serveWarning is added to every write confirmation while the daemon is down:
+// the action is still recorded, the device just cannot hear it yet.
+const serveWarning = "Daemon not running: the device will not reach the ACS until serve runs."
 
 // actionKind is the three device actions the daemon supports.
 type actionKind int
@@ -60,22 +79,23 @@ type model struct {
 	deps Deps
 	now  func() time.Time
 
-	w, h     int
-	screen   screen
-	tick     func(every time.Duration) tea.Cmd
-	lastAuto time.Time
+	w, h   int
+	screen screen
+	tick   func(every time.Duration) tea.Cmd
 
 	dev  devicesPane
 	det  detailPane
 	task tasksPane
 	jobs jobsPane
 	jobd jobPane
-	logs logsPane
 
 	status    string
 	statusBad bool
 	loading   string
 	confirm   *confirmState
+
+	serve    serveState
+	serveErr error
 }
 
 func newModel(ctx context.Context, d Deps) model {
@@ -88,7 +108,7 @@ func newModel(ctx context.Context, d Deps) model {
 // re-arms itself; q stops the program, so no tick reaches the model after
 // that.
 func (m model) Init() tea.Cmd {
-	return tea.Batch(loadDevices(m.ctx, m.deps.Devices), m.tick(tickEvery))
+	return tea.Batch(loadDevices(m.ctx, m.deps.Devices), m.checkServing(), m.tick(tickEvery))
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -99,9 +119,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.key(msg)
 	case tickMsg:
-		// Re-arm first, then reload the active tab if it is due. A nil load
-		// leaves the chain running.
-		return m, tea.Batch(m.autoRefresh(msg.at), m.tick(tickEvery))
+		// Re-arm the chain, then reload the active tab and re-read the daemon
+		// state. The status read runs even during a confirmation or on a
+		// detail screen; only the reload is gated.
+		return m, tea.Batch(m.autoRefresh(), m.checkServing(), m.tick(tickEvery))
+	case servingMsg:
+		if msg.err != nil {
+			m.serve, m.serveErr = serveUnknown, msg.err
+			m.fail("daemon status", msg.err)
+			return m, nil
+		}
+		m.serveErr = nil
+		m.serve = serveUp
+		if !msg.up {
+			m.serve = serveDown
+		}
+		return m, nil
 	case devicesMsg:
 		m.loading = ""
 		if msg.err != nil {
@@ -197,15 +230,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, loadDetailTasks(m.ctx, m.deps.Tasks, msg.device)
-	case logsMsg:
-		m.loading = ""
-		if msg.err != nil {
-			m.logs.fail(msg.err, m.now())
-			m.fail("logs", msg.err)
-			return m, nil
-		}
-		m.logs.set(msg.lines, m.now())
-		return m, nil
 	case detailTasksMsg:
 		if msg.device != m.det.device.ID {
 			return m, nil
@@ -248,15 +272,13 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.switchTo(scrTasks)
 	case "3":
 		return m, m.switchTo(scrJobs)
-	case "4":
-		return m, m.switchTo(scrLogs)
 	case "tab":
 		return m, m.switchTo(m.nextTab(1))
 	case "shift+tab":
 		return m, m.switchTo(m.nextTab(-1))
 	case "r":
 		m.status, m.statusBad = "", false
-		return m, m.refresh()
+		return m, tea.Batch(m.refresh(), m.checkServing())
 	case "/":
 		if f := m.activeFilter(); f != nil {
 			f.begin()
@@ -291,13 +313,13 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		return m, m.enter()
-	case "esc":
+	case "esc", "backspace":
 		return m, m.back()
 	}
 	return m, nil
 }
 
-// confirmKey is modal: only y and n (plus Esc for n) do anything, so a held
+// confirmKey is modal: only y and n (plus Esc or Backspace for n) do anything, so a held
 // key cannot queue the same task twice.
 func (m model) confirmKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	c := m.confirm
@@ -316,7 +338,7 @@ func (m model) confirmKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.queue(c)
-	case "n", "N", "esc":
+	case "n", "N", "esc", "backspace":
 		m.confirm = nil
 		m.say("cancelled")
 	}
@@ -338,8 +360,6 @@ func (m *model) activeFilter() *filter {
 		return &m.task.filter
 	case scrJobs:
 		return &m.jobs.filter
-	case scrLogs:
-		return &m.logs.filter
 	}
 	return nil
 }
@@ -353,8 +373,6 @@ func (m *model) refilterRows() {
 		m.task.refilter()
 	case scrJobs:
 		m.jobs.refilter()
-	case scrLogs:
-		m.logs.refilter()
 	}
 }
 
@@ -396,8 +414,6 @@ func (m *model) moveCursor(delta int) {
 		m.det.cur.move(delta, len(m.det.rows))
 	case scrJob:
 		m.jobd.cur.move(delta, len(m.jobd.failures))
-	case scrLogs:
-		m.logs.cur.move(delta, len(m.logs.view))
 	}
 }
 
@@ -413,7 +429,7 @@ func (m *model) enter() tea.Cmd {
 	return nil
 }
 
-var tabs = []screen{scrDevices, scrTasks, scrJobs, scrLogs}
+var tabs = []screen{scrDevices, scrTasks, scrJobs}
 
 func (m model) nextTab(dir int) screen {
 	cur := 0
@@ -422,8 +438,6 @@ func (m model) nextTab(dir int) screen {
 		cur = 1
 	case scrJobs, scrJob:
 		cur = 2
-	case scrLogs:
-		cur = 3
 	}
 	cur = (cur + dir + len(tabs)) % len(tabs)
 	return tabs[cur]
@@ -444,12 +458,9 @@ func (m *model) switchTo(s screen) tea.Cmd {
 		return loadTasks(m.ctx, m.deps.Tasks, id)
 	}
 	m.screen = s
-	switch {
-	case s == scrJobs && !m.jobs.loaded:
+	if s == scrJobs && !m.jobs.loaded {
 		m.loading = "loading jobs…"
 		return loadJobs(m.ctx, m.deps.Jobs)
-	case s == scrLogs && !m.logs.loaded:
-		return m.loadLogs()
 	}
 	return nil
 }
@@ -494,22 +505,8 @@ func (m *model) refresh() tea.Cmd {
 		}
 		m.loading = fmt.Sprintf("loading job %d…", m.jobd.job.ID)
 		return loadJob(m.ctx, m.deps.Jobs, m.jobd.job.ID)
-	case scrLogs:
-		return m.loadLogs()
 	}
 	return nil
-}
-
-// loadLogs starts one read of the newest lines. A missing reader is a status
-// line, never a panic.
-func (m *model) loadLogs() tea.Cmd {
-	if m.deps.Logs == nil {
-		m.logs.fail(errNoLogs, m.now())
-		m.say(errNoLogs.Error())
-		return nil
-	}
-	m.loading = "loading log lines…"
-	return loadLogs(m.ctx, m.deps.Logs)
 }
 
 func (m *model) openDevice() tea.Cmd {
@@ -706,11 +703,6 @@ type jobMsg struct {
 	err      error
 }
 
-type logsMsg struct {
-	lines []string
-	err   error
-}
-
 type wakeMsg struct {
 	id    string
 	label string
@@ -731,30 +723,38 @@ type detailTasksMsg struct {
 	err    error
 }
 
-type tickMsg struct{ at time.Time }
+type servingMsg struct {
+	up  bool
+	err error
+}
+
+type tickMsg struct{}
+
+// checkServing is one status read. A nil dep means the caller has no daemon
+// lock to ask about, and then nothing is scheduled at all.
+func (m model) checkServing() tea.Cmd {
+	read := m.deps.Serving
+	if read == nil {
+		return nil
+	}
+	ctx := m.ctx
+	return func() tea.Msg {
+		up, err := read(ctx)
+		return servingMsg{up: up, err: err}
+	}
+}
 
 func tickCmd(every time.Duration) tea.Cmd {
-	return tea.Tick(every, func(t time.Time) tea.Msg { return tickMsg{at: t} })
+	return tea.Tick(every, func(time.Time) tea.Msg { return tickMsg{} })
 }
 
 // autoRefresh reloads the active tab on its own cadence. It never runs while a
 // confirmation or a user-initiated query is open, and it never touches the
 // filter, so the same query keeps narrowing the fresh rows.
-func (m *model) autoRefresh(at time.Time) tea.Cmd {
+func (m *model) autoRefresh() tea.Cmd {
 	if m.confirm != nil || m.loading != "" {
 		return nil
 	}
-	switch m.screen {
-	case scrLogs:
-		// Logs reload on every tick.
-	case scrDevices, scrTasks, scrJobs:
-		if !m.lastAuto.IsZero() && at.Sub(m.lastAuto) < tabInterval {
-			return nil
-		}
-	default:
-		return nil
-	}
-	m.lastAuto = at
 	return m.silentLoad()
 }
 
@@ -771,11 +771,6 @@ func (m *model) silentLoad() tea.Cmd {
 		return loadTasks(m.ctx, m.deps.Tasks, m.task.deviceID)
 	case scrJobs:
 		return loadJobs(m.ctx, m.deps.Jobs)
-	case scrLogs:
-		if m.deps.Logs == nil {
-			return nil
-		}
-		return loadLogs(m.ctx, m.deps.Logs)
 	}
 	return nil
 }
@@ -820,15 +815,6 @@ func loadDetail(ctx context.Context, d Deps, id string) tea.Cmd {
 			msg.events = events
 		}
 		return msg
-	}
-}
-
-var errNoLogs = fmt.Errorf("log reader is not configured")
-
-func loadLogs(ctx context.Context, read func(context.Context, int) ([]string, error)) tea.Cmd {
-	return func() tea.Msg {
-		lines, err := read(ctx, logLimit)
-		return logsMsg{lines: lines, err: err}
 	}
 }
 

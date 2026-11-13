@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
+	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -27,10 +27,7 @@ import (
 	"github.com/prawirdani/opticore/internal/wake"
 )
 
-var (
-	testDSN string
-	testKey = []byte("0123456789abcdef0123456789abcdef")
-)
+var testDSN string
 
 func TestMain(m *testing.M) {
 	base := os.Getenv("OPTICORE_TEST_DSN")
@@ -107,11 +104,11 @@ func newHarness(t *testing.T, configure func(*fakeCPE)) *harness {
 func newHarnessWith(t *testing.T, configure func(*fakeCPE), opts ...harnessOpt) *harness {
 	t.Helper()
 	st := testStore(t)
-	sessions := &Sessions{Store: st, Key: testKey,
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), GPVBatch: 32, MaxAttempts: 2}
+	sessions := &Sessions{Store: st,
+		Logger: log.New(io.Discard, "", 0), GPVBatch: 32, MaxAttempts: 2}
 	cs := &cwmp.Server{
 		Handler: sessions,
-		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:  log.New(io.Discard, "", 0),
 		MaxBody: 10 << 20, SessionTimeout: 5 * time.Second, MaxSessions: 10,
 	}
 	cs.Start()
@@ -126,7 +123,7 @@ func newHarnessWith(t *testing.T, configure func(*fakeCPE), opts ...harnessOpt) 
 	if configure != nil {
 		configure(f)
 	}
-	h := &harness{t: t, acs: srv, svc: &Service{Store: st, Key: testKey}, st: st, cpe: f.client, sess: f}
+	h := &harness{t: t, acs: srv, svc: &Service{Store: st}, st: st, cpe: f.client, sess: f}
 	sessions.Svc = h.svc
 	for _, o := range opts {
 		o(h, sessions)
@@ -381,7 +378,7 @@ func TestSetTaskReadsPrevThenSetsAndCaches(t *testing.T) {
 	}
 }
 
-func TestSecretSetIsSealedAtRestAndDecryptedOnTheWire(t *testing.T) {
+func TestSecretSetStoredRawAndSentPlaintext(t *testing.T) {
 	h := newHarness(t, nil)
 	ctx := context.Background()
 	h.sess.inform("48575443BD7589AB", []string{"0 BOOTSTRAP", "1 BOOT"})
@@ -393,8 +390,11 @@ func TestSecretSetIsSealedAtRestAndDecryptedOnTheWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	ts, _ := h.st.ListTasks(ctx, "48575443BD7589AB", 10)
-	if strings.Contains(string(ts[0].Args), "hunter2") {
-		t.Errorf("args stored plaintext: %s", ts[0].Args)
+	if !strings.Contains(string(ts[0].Args), "hunter2") {
+		t.Errorf("args not stored as written: %s", ts[0].Args)
+	}
+	if strings.Contains(string(ts[0].Args), "enc:") {
+		t.Errorf("args still sealed: %s", ts[0].Args)
 	}
 	h.sess.params = map[string]string{}
 	h.sess.inform("48575443BD7589AB", []string{"2 PERIODIC"})
@@ -763,7 +763,7 @@ func TestWakeUnauthorizedClearsCredentials(t *testing.T) {
 	if _, err := h.st.Pool().Exec(ctx, `UPDATE devices SET cr_url = $2 WHERE id = $1`, d.ID, deny.URL); err != nil {
 		t.Fatal(err)
 	}
-	svc := &Service{Store: h.st, Key: testKey, Waker: wake.New(time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))}
+	svc := &Service{Store: h.st, Waker: wake.New(time.Second, log.New(io.Discard, "", 0))}
 	if err := svc.Wake(ctx, "48575443BD7589AB"); !errors.Is(err, wake.ErrUnauthorized) {
 		t.Fatalf("err = %v, want ErrUnauthorized", err)
 	}

@@ -37,11 +37,10 @@ type fake struct {
 	enqueueErr error
 	nextID     int64
 
-	logLines []string
-	logsErr  error
-	logsN    int
-
 	calls map[string]int
+
+	serveDown  bool
+	servingErr error
 }
 
 func (f *fake) note(name string) {
@@ -53,8 +52,16 @@ func (f *fake) note(name string) {
 
 func (f *fake) count(name string) int { return f.calls[name] }
 
+func (f *fake) serving(ctx context.Context) (bool, error) {
+	f.note("Serving")
+	if f.servingErr != nil {
+		return false, f.servingErr
+	}
+	return !f.serveDown, nil
+}
+
 func (f *fake) deps() Deps {
-	return Deps{Devices: f, Tasks: f, Jobs: f, Events: f, Params: f, Wake: f.wake, Enqueue: f.enqueue, Logs: f.logs}
+	return Deps{Devices: f, Tasks: f, Jobs: f, Events: f, Params: f, Wake: f.wake, Enqueue: f.enqueue, Serving: f.serving}
 }
 
 func (f *fake) ListDevices(ctx context.Context, flt store.ListFilter) ([]store.Device, error) {
@@ -145,12 +152,6 @@ func (f *fake) wake(ctx context.Context, idOrSerial string) error {
 	return f.wakeErr
 }
 
-func (f *fake) logs(ctx context.Context, n int) ([]string, error) {
-	f.note("Logs")
-	f.logsN = n
-	return f.logLines, f.logsErr
-}
-
 func (f *fake) enqueue(ctx context.Context, idOrSerial string, tasks []store.NewTask) ([]store.Task, error) {
 	if f.enqueueErr != nil {
 		return nil, f.enqueueErr
@@ -183,6 +184,14 @@ func newTestModel(f *fake) model {
 func settle(t *testing.T, m model, msg tea.Msg) model {
 	t.Helper()
 	for i := 0; i < 100; i++ {
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, cmd := range batch {
+				if cmd != nil {
+					m = settle(t, m, cmd())
+				}
+			}
+			return m
+		}
 		mm, cmd := m.Update(msg)
 		next, ok := mm.(model)
 		if !ok {
@@ -215,6 +224,7 @@ var (
 	keyDown  = tea.KeyMsg{Type: tea.KeyDown}
 	keyEnter = tea.KeyMsg{Type: tea.KeyEnter}
 	keyEsc   = tea.KeyMsg{Type: tea.KeyEsc}
+	keyBack  = tea.KeyMsg{Type: tea.KeyBackspace}
 )
 
 func device(i int) store.Device {
@@ -282,6 +292,12 @@ func TestFilterNarrowsAndZeroMatch(t *testing.T) {
 	}
 	if !strings.Contains(m.View(), "No device matches") {
 		t.Fatalf("zero-match screen has no empty state:\n%s", m.View())
+	}
+
+	// While typing a filter, backspace edits the text instead of going back.
+	m = press(t, m, keyBack)
+	if !strings.HasSuffix(m.dev.filter.text, "zz") || strings.HasSuffix(m.dev.filter.text, "zzz") || m.screen != scrDevices {
+		t.Fatalf("backspace in the filter: text=%q screen=%v", m.dev.filter.text, m.screen)
 	}
 
 	m = press(t, m, keyEsc)
@@ -477,13 +493,13 @@ func TestDetailExpandsOneLevelAndNeverPrintsSecrets(t *testing.T) {
 	if m.det.expanded["InternetGatewayDevice.ManagementServer."] {
 		t.Fatal("esc did not collapse the leaf's parent")
 	}
-	m = press(t, m, keyEsc) // collapse the root object: it is the last parent.
+	m = press(t, m, keyBack) // backspace is esc: collapse the root object.
 	if m.det.expanded["InternetGatewayDevice."] || len(m.det.rows) != 1 {
-		t.Fatalf("esc did not collapse to the root level: %v", m.det.expanded)
+		t.Fatalf("backspace did not collapse to the root level: %v", m.det.expanded)
 	}
-	m = press(t, m, keyEsc) // nothing left: back to the list.
+	m = press(t, m, keyBack) // nothing left: back to the list.
 	if m.screen != scrDevices {
-		t.Fatalf("esc did not leave the detail: %v", m.screen)
+		t.Fatalf("backspace did not leave the detail: %v", m.screen)
 	}
 }
 
@@ -751,9 +767,9 @@ func TestConfirmBlocksOtherKeys(t *testing.T) {
 		t.Fatalf("keys inside the confirmation acted: queued=%+v woken=%v", f.queued, f.woken)
 	}
 
-	m = press(t, m, keyEsc)
+	m = press(t, m, keyBack)
 	if m.confirm != nil || len(f.queued) != 0 || m.status != "cancelled" {
-		t.Fatalf("esc did not cancel cleanly: confirm=%v queued=%+v status=%q", m.confirm, f.queued, m.status)
+		t.Fatalf("backspace did not cancel cleanly: confirm=%v queued=%+v status=%q", m.confirm, f.queued, m.status)
 	}
 }
 
@@ -789,272 +805,10 @@ func TestListWakeStillCallsWakeOnly(t *testing.T) {
 	}
 }
 
-func sampleLogs() []string {
-	return []string{
-		`{"time":"2026-11-13T15:53:20.5+07:00","level":"INFO","msg":"inform","device_id":"B8DD71-F670L-ZTEGC456730E","events":["2 PERIODIC"],"retry":0}`,
-		`{"time":"2026-11-13T15:53:24.1+07:00","level":"warn","msg":"wake refused","device_id":"B8DD71-F670L-ZTEGC456730E","retry":2,"pending_versions":0}`,
-	}
-}
-
-func plainLines(m model) []string {
-	var out []string
-	for _, line := range strings.Split(m.View(), "\n") {
-		out = append(out, stripANSI(line))
-	}
-	return out
-}
-
-func lineWithPrefix(lines []string, prefix string) string {
-	for _, line := range lines {
-		if strings.HasPrefix(line, prefix) {
-			return line
-		}
-	}
-	return ""
-}
-
-func TestLogsRenderFixedColumnsAndFieldOrder(t *testing.T) {
-	f := &fake{devices: nDevices(1), logLines: sampleLogs()}
-	m := boot(t, f)
-	m = press(t, m, typed("4"))
-	if m.screen != scrLogs {
-		t.Fatalf("4 did not open the logs tab: %v", m.screen)
-	}
-	if f.logsN != logLimit {
-		t.Fatalf("read %d lines, want %d", f.logsN, logLimit)
-	}
-
-	lines := plainLines(m)
-	warn := lineWithPrefix(lines, "15:53:24")
-	want := "15:53:24 WARN  wake refused  device_id=B8DD71-F670L-ZTEGC456730E  retry=2  pending_versions=0"
-	if !strings.HasPrefix(warn, want) {
-		t.Fatalf("warn line:\n got %q\nwant %q", warn, want)
-	}
-	info := lineWithPrefix(lines, "15:53:20")
-	wantInfo := "15:53:20 INFO  inform  device_id=B8DD71-F670L-ZTEGC456730E  events=[2 PERIODIC]  retry=0"
-	if !strings.HasPrefix(info, wantInfo) {
-		t.Fatalf("info line:\n got %q\nwant %q", info, wantInfo)
-	}
-
-	// Fixed columns: clock 0..7, one space, level 9..13, message from 15.
-	for _, line := range []string{warn, info} {
-		if level := line[9:14]; level != "WARN " && level != "INFO " {
-			t.Fatalf("level column %q in %q", level, line)
-		}
-		if line[8] != ' ' || line[14] != ' ' {
-			t.Fatalf("column separators wrong in %q", line)
-		}
-	}
-	if !strings.HasPrefix(warn[15:], "wake refused") || !strings.HasPrefix(info[15:], "inform") {
-		t.Fatalf("message column drifted: %q / %q", warn[15:], info[15:])
-	}
-
-	// Fields keep the order they were written in.
-	if !(strings.Index(warn, "device_id=") < strings.Index(warn, "retry=") &&
-		strings.Index(warn, "retry=") < strings.Index(warn, "pending_versions=")) {
-		t.Fatalf("fields are out of order: %q", warn)
-	}
-	if !(strings.Index(info, "device_id=") < strings.Index(info, "events=") &&
-		strings.Index(info, "events=") < strings.Index(info, "retry=")) {
-		t.Fatalf("fields are out of order: %q", info)
-	}
-}
-
-func TestLogsKeepNonJSONLineVerbatim(t *testing.T) {
-	f := &fake{devices: nDevices(1)}
-	f.logLines = append(sampleLogs(), `panic: partial write {"time":"2026-11`)
-	m := boot(t, f)
-	m = press(t, m, typed("4"))
-
-	lines := plainLines(m)
-	if got := lineWithPrefix(lines, "panic: partial write"); !strings.HasPrefix(got, `panic: partial write {"time":"2026-11`) {
-		t.Fatalf("raw line not shown verbatim: %q", got)
-	}
-	if lineWithPrefix(lines, "15:53:24") == "" {
-		t.Fatalf("a broken line dropped its neighbours:\n%s", strings.Join(lines, "\n"))
-	}
-}
-
-func TestLogsNewestFirstAndCursorKeptOnRefresh(t *testing.T) {
-	f := &fake{devices: nDevices(1), logLines: sampleLogs()[:1]}
-	m := boot(t, f)
-	m = press(t, m, typed("4"))
-	if m.logs.cur.pos != 0 {
-		t.Fatalf("cursor does not start on the newest line: %d", m.logs.cur.pos)
-	}
-
-	f.logLines = sampleLogs() // 15:53:24 appended last on disk, newest
-	m = press(t, m, typed("r"))
-	if got := lineWithPrefix(plainLines(m), "15:53:2"); !strings.HasPrefix(got, "15:53:24") {
-		t.Fatalf("newest line is not on top: %q", got)
-	}
-
-	m = press(t, m, keyDown)
-	if m.logs.cur.pos != 1 {
-		t.Fatalf("cursor: %d, want 1", m.logs.cur.pos)
-	}
-	selected := m.logs.view[1].msg
-	f.logLines = append(f.logLines, `{"time":"2026-11-13T15:53:30+07:00","level":"INFO","msg":"session","device_id":"X"}`)
-	m = press(t, m, typed("r"))
-	if len(m.logs.view) != 3 {
-		t.Fatalf("view after refresh: %d lines", len(m.logs.view))
-	}
-	if m.logs.cur.pos != 2 || m.logs.view[2].msg != selected {
-		t.Fatalf("refresh lost the selected row: pos=%d want 2 for %q", m.logs.cur.pos, selected)
-	}
-}
-
-func TestLogsFilterOverMsgAndFields(t *testing.T) {
-	f := &fake{devices: nDevices(1), logLines: sampleLogs()}
-	m := boot(t, f)
-	m = press(t, m, typed("4"))
-
-	m = press(t, m, typed("/"))
-	m = press(t, m, typed("wake"))
-	if len(m.logs.view) != 1 || m.logs.view[0].msg != "wake refused" {
-		t.Fatalf("filter over msg: %+v", m.logs.view)
-	}
-	m = press(t, m, tea.KeyMsg{Type: tea.KeyCtrlU})
-	m = press(t, m, typed("2 PERIODIC"))
-	if len(m.logs.view) != 1 || m.logs.view[0].msg != "inform" {
-		t.Fatalf("filter over fields: %+v", m.logs.view)
-	}
-
-	m = press(t, m, typed("zzz"))
-	if len(m.logs.view) != 0 || m.logs.cur.pos != 0 {
-		t.Fatalf("zero-match: %d lines, pos %d", len(m.logs.view), m.logs.cur.pos)
-	}
-	if !strings.Contains(m.View(), "No log line matches") {
-		t.Fatalf("zero-match state missing:\n%s", m.View())
-	}
-}
-
-func TestLogsReaderErrorIsStatusLine(t *testing.T) {
-	f := &fake{devices: nDevices(1), logsErr: errors.New("open /var/log/opticore.log: permission denied")}
-	m := boot(t, f)
-	m = press(t, m, typed("4"))
-
-	if !m.statusBad || !strings.Contains(m.status, "permission denied") {
-		t.Fatalf("status: bad=%v %q", m.statusBad, m.status)
-	}
-	if m.screen != scrLogs || m.View() == "" {
-		t.Fatal("reader error lost the screen")
-	}
-	if !strings.Contains(m.View(), "could not be read") {
-		t.Fatalf("error body state missing:\n%s", m.View())
-	}
-}
-
-func TestLogsEmptyState(t *testing.T) {
-	m := boot(t, &fake{devices: nDevices(1)})
-	m = press(t, m, typed("4"))
-	if !strings.Contains(m.View(), "Logs is empty") {
-		t.Fatalf("empty state missing:\n%s", m.View())
-	}
-}
-
-func TestLogsReachedByKeyAndTab(t *testing.T) {
-	m := boot(t, &fake{devices: nDevices(1)})
-	m = press(t, m, typed("4"))
-	if m.screen != scrLogs {
-		t.Fatalf("4: %v", m.screen)
-	}
-	m = press(t, m, typed("1"))
-	if m.screen != scrDevices {
-		t.Fatalf("1: %v", m.screen)
-	}
-	for i := 0; i < 3; i++ {
-		m = press(t, m, tea.KeyMsg{Type: tea.KeyTab})
-	}
-	if m.screen != scrLogs {
-		t.Fatalf("tab cycling: %v", m.screen)
-	}
-	m = press(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
-	if m.screen != scrJobs {
-		t.Fatalf("shift+tab cycling: %v", m.screen)
-	}
-}
-
-func TestLogsTruncationNotice(t *testing.T) {
-	lines := make([]string, logLimit)
-	for i := range lines {
-		lines[i] = fmt.Sprintf(`{"time":"2026-11-13T15:00:00+07:00","level":"INFO","msg":"line %d"}`, i)
-	}
-	f := &fake{devices: nDevices(1), logLines: lines}
-	m := boot(t, f)
-	m = press(t, m, typed("4"))
-	if !strings.Contains(m.View(), "newest 300 lines") {
-		t.Fatalf("truncation is not stated:\n%s", m.View())
-	}
-	f.logLines = lines[:10]
-	m = press(t, m, typed("r"))
-	if strings.Contains(m.View(), "older entries are not loaded") {
-		t.Fatalf("stale truncation note:\n%s", m.View())
-	}
-}
-
 // send feeds any message, not just a key, through the same update loop.
 func send(t *testing.T, m model, msg tea.Msg) model {
 	t.Helper()
 	return settle(t, m, msg)
-}
-
-func TestTickReloadsOnlyTheActiveTab(t *testing.T) {
-	f := &fake{
-		devices:  nDevices(2),
-		logLines: sampleLogs(),
-		tasks:    []store.Task{{ID: 1, DeviceID: device(1).ID, Name: "get", Status: "done", UpdatedAt: testNow}},
-	}
-	m := boot(t, f)
-
-	// Devices tab.
-	devices, tasks := f.count("ListDevices"), f.count("ListTasksFiltered")
-	m = send(t, m, tickMsg{at: testNow.Add(time.Second)})
-	if got := f.count("ListDevices"); got != devices+1 {
-		t.Fatalf("devices tick: ListDevices %d -> %d", devices, got)
-	}
-	if got := f.count("ListTasksFiltered"); got != tasks {
-		t.Fatalf("devices tick reloaded tasks: %d -> %d", tasks, got)
-	}
-	if f.count("ListJobs") != 0 || f.count("Logs") != 0 {
-		t.Fatalf("devices tick touched other readers: jobs=%d logs=%d", f.count("ListJobs"), f.count("Logs"))
-	}
-
-	// Tasks tab.
-	m = press(t, m, typed("2"))
-	guard := f.count("ListDevices")
-	tasks = f.count("ListTasksFiltered")
-	m = send(t, m, tickMsg{at: testNow.Add(7 * time.Second)})
-	if f.count("ListTasksFiltered") != tasks+1 {
-		t.Fatalf("tasks tick did not reload tasks: %d", f.count("ListTasksFiltered"))
-	}
-	if f.count("ListDevices") != guard {
-		t.Fatalf("tasks tick reloaded devices")
-	}
-
-	// Jobs tab.
-	m = press(t, m, typed("3"))
-	guard = f.count("ListTasksFiltered")
-	jobs := f.count("ListJobs")
-	m = send(t, m, tickMsg{at: testNow.Add(13 * time.Second)})
-	if f.count("ListJobs") != jobs+1 {
-		t.Fatalf("jobs tick did not reload jobs: %d", f.count("ListJobs"))
-	}
-	if f.count("ListTasksFiltered") != guard {
-		t.Fatalf("jobs tick reloaded tasks")
-	}
-
-	// Logs tab, on the 1s tick.
-	m = press(t, m, typed("4"))
-	guard = f.count("ListJobs")
-	logs := f.count("Logs")
-	m = send(t, m, tickMsg{at: testNow.Add(14 * time.Second)})
-	if f.count("Logs") != logs+1 {
-		t.Fatalf("logs tick did not reload logs: %d", f.count("Logs"))
-	}
-	if f.count("ListJobs") != guard {
-		t.Fatalf("logs tick reloaded jobs")
-	}
 }
 
 func TestTickDoesNothingWhileConfirming(t *testing.T) {
@@ -1065,7 +819,7 @@ func TestTickDoesNothingWhileConfirming(t *testing.T) {
 		t.Fatal("no confirmation open")
 	}
 	before := f.count("ListDevices")
-	m = send(t, m, tickMsg{at: testNow.Add(time.Minute)})
+	m = send(t, m, tickMsg{})
 	if got := f.count("ListDevices"); got != before {
 		t.Fatalf("tick reloaded during a confirmation: %d -> %d", before, got)
 	}
@@ -1074,79 +828,266 @@ func TestTickDoesNothingWhileConfirming(t *testing.T) {
 	}
 }
 
-func TestTickKeepsLogFilter(t *testing.T) {
-	f := &fake{devices: nDevices(1), logLines: sampleLogs()}
-	m := boot(t, f)
-	m = press(t, m, typed("4"))
-	m = press(t, m, typed("/"))
-	m = press(t, m, typed("wake"))
-	if len(m.logs.view) != 1 {
-		t.Fatalf("filter did not apply: %d rows", len(m.logs.view))
-	}
-
-	f.logLines = append(f.logLines, `{"time":"2026-11-13T15:54:00+07:00","level":"INFO","msg":"inform","device_id":"X"}`)
-	m = send(t, m, tickMsg{at: testNow.Add(time.Second)})
-	if m.logs.filter.text != "wake" || !m.logs.filter.editing {
-		t.Fatalf("tick dropped the filter: %q editing=%v", m.logs.filter.text, m.logs.filter.editing)
-	}
-	if len(m.logs.view) != 1 || m.logs.view[0].msg != "wake refused" {
-		t.Fatalf("filter not reapplied: %+v", m.logs.view)
-	}
-}
-
-func TestLogCursorAnchoredWhenLinesArrive(t *testing.T) {
-	f := &fake{devices: nDevices(1), logLines: sampleLogs()}
-	m := boot(t, f)
-	m = press(t, m, typed("4"))
-	if len(m.logs.view) != 2 || m.logs.cur.pos != 0 {
-		t.Fatalf("start state: rows=%d pos=%d", len(m.logs.view), m.logs.cur.pos)
-	}
-
-	m = press(t, m, keyDown)
-	selected := m.logs.view[m.logs.cur.pos].msg
-	f.logLines = append(f.logLines,
-		`{"time":"2026-11-13T15:54:00+07:00","level":"INFO","msg":"new-a"}`,
-		`{"time":"2026-11-13T15:54:01+07:00","level":"INFO","msg":"new-b"}`,
-	)
-	m = send(t, m, tickMsg{at: testNow.Add(time.Second)})
-	if m.logs.cur.pos != 3 {
-		t.Fatalf("scroll anchor: pos=%d, want 3", m.logs.cur.pos)
-	}
-	if got := m.logs.view[m.logs.cur.pos].msg; got != selected {
-		t.Fatalf("selected row changed: %q -> %q", selected, got)
-	}
-	if m.logs.view[0].msg != "new-b" {
-		t.Fatalf("newest line is not on top: %q", m.logs.view[0].msg)
-	}
-
-	// Back on the newest line, new lines appear above the cursor.
-	m = press(t, m, typed("g"))
-	f.logLines = append(f.logLines, `{"time":"2026-11-13T15:54:02+07:00","level":"INFO","msg":"new-c"}`)
-	m = send(t, m, tickMsg{at: testNow.Add(2 * time.Second)})
-	if m.logs.cur.pos != 0 {
-		t.Fatalf("cursor left the newest line: pos=%d", m.logs.cur.pos)
-	}
-	if m.logs.view[0].msg != "new-c" {
-		t.Fatalf("newest line is not on top: %q", m.logs.view[0].msg)
-	}
-}
-
 func TestTickCmdCarriesTheTime(t *testing.T) {
 	msg := tickCmd(time.Millisecond)()
-	tm, ok := msg.(tickMsg)
-	if !ok {
+	if _, ok := msg.(tickMsg); !ok {
 		t.Fatalf("tick command returned %T", msg)
-	}
-	if tm.at.IsZero() {
-		t.Fatal("tick carries no timestamp")
 	}
 
 	// A tick on a tab that is due reloads; the chain is re-armed by the same
 	// update, so there is never more than one timer.
 	m := boot(t, &fake{devices: nDevices(1)})
 	m.tick = tickCmd
-	_, cmd := m.Update(tickMsg{at: testNow.Add(time.Second)})
+	_, cmd := m.Update(tickMsg{})
 	if cmd == nil {
 		t.Fatal("the tick chain did not re-arm")
+	}
+}
+
+func TestTickReloadsOnlyTheActiveTab(t *testing.T) {
+	f := &fake{
+		devices: nDevices(2),
+		tasks:   []store.Task{{ID: 1, DeviceID: device(1).ID, Name: "get", Status: "done", UpdatedAt: testNow}},
+	}
+	m := boot(t, f)
+
+	devices := f.count("ListDevices")
+	m = send(t, m, tickMsg{})
+	if got := f.count("ListDevices"); got != devices+1 {
+		t.Fatalf("devices tick: ListDevices %d -> %d", devices, got)
+	}
+	if f.count("ListTasksFiltered") != 0 || f.count("ListJobs") != 0 {
+		t.Fatalf("devices tick touched another reader: tasks=%d jobs=%d",
+			f.count("ListTasksFiltered"), f.count("ListJobs"))
+	}
+
+	m = press(t, m, typed("2"))
+	devices = f.count("ListDevices")
+	tasks := f.count("ListTasksFiltered")
+	m = send(t, m, tickMsg{})
+	if f.count("ListTasksFiltered") != tasks+1 {
+		t.Fatalf("tasks tick did not reload tasks: %d", f.count("ListTasksFiltered"))
+	}
+	if f.count("ListDevices") != devices {
+		t.Fatal("tasks tick reloaded devices")
+	}
+
+	m = press(t, m, typed("3"))
+	tasks = f.count("ListTasksFiltered")
+	jobs := f.count("ListJobs")
+	m = send(t, m, tickMsg{})
+	if f.count("ListJobs") != jobs+1 {
+		t.Fatalf("jobs tick did not reload jobs: %d", f.count("ListJobs"))
+	}
+	if f.count("ListTasksFiltered") != tasks {
+		t.Fatal("jobs tick reloaded tasks")
+	}
+}
+
+func TestTickKeepsFilterAndCursor(t *testing.T) {
+	f := &fake{devices: nDevices(3)}
+	m := boot(t, f)
+	m = press(t, m, keyDown)
+	m = press(t, m, keyDown)
+	m = press(t, m, typed("/"))
+	m = press(t, m, typed("ont"))
+	if len(m.dev.view) != 3 || m.dev.cur.pos != 2 {
+		t.Fatalf("pre-tick state: rows=%d pos=%d", len(m.dev.view), m.dev.cur.pos)
+	}
+	selected := m.dev.view[2].Serial
+
+	f.devices = nDevices(4)
+	m = send(t, m, tickMsg{})
+	if m.dev.filter.text != "ont" || !m.dev.filter.editing {
+		t.Fatalf("tick dropped the filter: %q editing=%v", m.dev.filter.text, m.dev.filter.editing)
+	}
+	if m.dev.cur.pos != 2 || m.dev.view[2].Serial != selected {
+		t.Fatalf("tick moved the cursor: pos=%d selected=%q, want %q",
+			m.dev.cur.pos, m.dev.view[m.dev.cur.pos].Serial, selected)
+	}
+	if len(m.dev.view) != 4 {
+		t.Fatalf("tick did not reload: %d rows", len(m.dev.view))
+	}
+}
+
+func TestTabsCycleThreeScreens(t *testing.T) {
+	m := boot(t, &fake{devices: nDevices(1)})
+	steps := []struct {
+		k    tea.KeyMsg
+		want screen
+	}{
+		{tea.KeyMsg{Type: tea.KeyTab}, scrTasks},
+		{tea.KeyMsg{Type: tea.KeyTab}, scrJobs},
+		{tea.KeyMsg{Type: tea.KeyTab}, scrDevices},
+		{tea.KeyMsg{Type: tea.KeyShiftTab}, scrJobs},
+	}
+	for _, step := range steps {
+		m = press(t, m, step.k)
+		if m.screen != step.want {
+			t.Fatalf("after %v: screen %v, want %v", step.k, m.screen, step.want)
+		}
+	}
+}
+
+func TestFourDoesNothing(t *testing.T) {
+	m := boot(t, &fake{devices: nDevices(1)})
+	m = press(t, m, typed("4"))
+	if m.screen != scrDevices {
+		t.Fatalf("4 moved the screen to %v", m.screen)
+	}
+	if m.status != "" || m.loading != "" {
+		t.Fatalf("4 said something: status=%q loading=%q", m.status, m.loading)
+	}
+	if strings.Contains(m.View(), "logs") {
+		t.Fatalf("the tab bar still mentions logs:\n%s", m.View())
+	}
+}
+
+func TestServingHeaderStates(t *testing.T) {
+	f := &fake{devices: nDevices(1)}
+	m := boot(t, f)
+	if got := f.count("Serving"); got != 1 {
+		t.Fatalf("serving checked %d times at start, want 1", got)
+	}
+	if !strings.Contains(m.View(), "● serving") {
+		t.Fatalf("no serving mark:\n%s", m.View())
+	}
+	if strings.Contains(m.View(), "daemon not running") {
+		t.Fatal("down alert shown while serving")
+	}
+
+	f.serveDown = true
+	m = send(t, m, tickMsg{})
+	view := m.View()
+	if strings.Contains(view, "● serving") {
+		t.Fatalf("stale serving mark:\n%s", view)
+	}
+	if !strings.Contains(view, "✕ daemon not running — devices cannot reach the ACS; wakes and tasks wait") {
+		t.Fatalf("down alert missing:\n%s", view)
+	}
+}
+
+func TestServingFlipKeepsScreenState(t *testing.T) {
+	f := &fake{devices: nDevices(3)}
+	m := boot(t, f)
+	m = press(t, m, keyDown)
+	m = press(t, m, typed("/"))
+	m = press(t, m, typed("ont"))
+	if m.dev.cur.pos != 1 || len(m.dev.view) != 3 {
+		t.Fatalf("pre-tick state: pos=%d rows=%d", m.dev.cur.pos, len(m.dev.view))
+	}
+	selected := m.dev.view[1].Serial
+
+	f.serveDown = true
+	m = send(t, m, tickMsg{})
+	if m.dev.filter.text != "ont" || !m.dev.filter.editing {
+		t.Fatalf("serving flip dropped the filter: %q editing=%v", m.dev.filter.text, m.dev.filter.editing)
+	}
+	if m.dev.cur.pos != 1 || m.dev.view[1].Serial != selected {
+		t.Fatalf("serving flip moved the cursor: pos=%d want %q", m.dev.cur.pos, selected)
+	}
+	if m.serve != serveDown {
+		t.Fatalf("state did not flip: %v", m.serve)
+	}
+
+	// A confirmation stays open across the status read, and the list behind it
+	// keeps its rows.
+	m = press(t, m, keyEsc) // leave filter editing
+	m = press(t, m, typed("w"))
+	if m.confirm == nil {
+		t.Fatal("no confirmation open")
+	}
+	id := m.confirm.id
+	m = send(t, m, tickMsg{})
+	if m.confirm == nil || m.confirm.id != id {
+		t.Fatalf("status read closed the confirmation: %+v", m.confirm)
+	}
+	if !strings.Contains(m.View(), "daemon not running") {
+		t.Fatalf("alert missing during a confirmation:\n%s", m.View())
+	}
+}
+
+func TestServingFlipKeepsParameterTree(t *testing.T) {
+	d := device(1)
+	f := &fake{
+		devices: []store.Device{d},
+		params: map[string]map[string]store.Param{d.ID: {
+			"InternetGatewayDevice.DeviceInfo.Manufacturer": {Value: "Huawei"},
+			"InternetGatewayDevice.DeviceInfo.UpTime":       {Value: "10"},
+		}},
+	}
+	m := boot(t, f)
+	m = press(t, m, keyEnter)
+	m = press(t, m, keyEnter)
+	if !m.det.expanded["InternetGatewayDevice."] || len(m.det.rows) != 2 {
+		t.Fatalf("tree did not expand: %v rows=%d", m.det.expanded, len(m.det.rows))
+	}
+	rows := len(m.det.rows)
+
+	f.serveDown = true
+	m = send(t, m, tickMsg{})
+	if len(m.det.rows) != rows || !m.det.expanded["InternetGatewayDevice."] {
+		t.Fatalf("status read reset the parameter tree: rows=%d want %d", len(m.det.rows), rows)
+	}
+	if !strings.Contains(m.View(), "daemon not running") {
+		t.Fatalf("detail screen lost the daemon alert:\n%s", m.View())
+	}
+}
+
+func TestServingErrorShowsUnknown(t *testing.T) {
+	f := &fake{devices: nDevices(1), servingErr: errors.New("advisory lock query failed")}
+	m := boot(t, f)
+	view := m.View()
+	if !strings.Contains(view, "? daemon status unknown") {
+		t.Fatalf("unknown mark missing:\n%s", view)
+	}
+	if strings.Contains(view, "● serving") || strings.Contains(view, "✕") {
+		t.Fatal("unknown state rendered as known")
+	}
+	if !m.statusBad || !strings.Contains(m.status, "advisory lock query failed") {
+		t.Fatalf("status: bad=%v %q", m.statusBad, m.status)
+	}
+	if m.View() == "" {
+		t.Fatal("screen went blank on a serving error")
+	}
+}
+
+func TestServingNilRendersNothing(t *testing.T) {
+	f := &fake{devices: nDevices(1)}
+	m := newTestModel(f)
+	m.deps.Serving = nil
+	if cmd := m.checkServing(); cmd != nil {
+		t.Fatal("nil Serving still scheduled a read")
+	}
+	m = settle(t, m, m.Init()())
+	view := m.View()
+	for _, needle := range []string{"serving", "daemon", "status unknown"} {
+		if strings.Contains(view, needle) {
+			t.Fatalf("nil Deps.Serving rendered %q:\n%s", needle, view)
+		}
+	}
+}
+
+func TestConfirmWarnsOnlyWhenDown(t *testing.T) {
+	f := &fake{devices: nDevices(1)}
+	m := boot(t, f)
+	m = press(t, m, keyEnter)
+	m = press(t, m, typed("b"))
+	if strings.Contains(m.View(), serveWarning) {
+		t.Fatalf("warning shown while serving:\n%s", m.View())
+	}
+	m = press(t, m, keyEsc)
+
+	f.serveDown = true
+	m = send(t, m, tickMsg{})
+	m = press(t, m, typed("b"))
+	if !strings.Contains(m.View(), serveWarning) {
+		t.Fatalf("confirmation lacks the down warning:\n%s", m.View())
+	}
+
+	// The warning is information, not a block: the task is still queued.
+	m = press(t, m, typed("y"))
+	if len(f.queued) != 1 || f.queued[0].Name != "reboot" {
+		t.Fatalf("down state blocked the action: %+v", f.queued)
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
-	"log/slog"
+	"log"
 	"mime"
 	"net"
 	"net/http"
@@ -28,7 +28,7 @@ const serverName = "Opticore"
 // transport, session tracking and RPC sequencing; Handler owns the domain.
 type Server struct {
 	Handler        Handler
-	Logger         *slog.Logger
+	Logger         *log.Logger
 	MaxBody        int64         // decompressed body limit
 	SessionTimeout time.Duration // idle limit between POSTs
 	MaxDuration    time.Duration // hard session cap
@@ -73,7 +73,7 @@ func (s *Server) Start() {
 	s.stop = make(chan struct{})
 	s.mu.Unlock()
 	if s.Logger == nil {
-		s.Logger = slog.Default()
+		s.Logger = log.Default()
 	}
 	if s.MaxDuration == 0 {
 		s.MaxDuration = 300 * time.Second
@@ -115,7 +115,7 @@ func (s *Server) sweep() {
 					continue
 				}
 				if now.Sub(ss.lastActivity) > s.SessionTimeout || now.Sub(ss.Started) > s.MaxDuration {
-					s.Logger.Info("cwmp session timeout", "device_id", ss.DeviceID, "session", ss.ID)
+					s.Logger.Printf("cwmp session timeout device=%s session=%s", ss.DeviceID, ss.ID)
 					s.end(ss)
 				}
 				ss.mu.Unlock()
@@ -167,7 +167,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if ss == nil && s.Auth != nil && !s.Auth.Check(r) {
 		// Keep the connection: the device retries the Inform on it with
 		// credentials (TR-069 §3.4.4).
-		s.Logger.Debug("cwmp auth challenge", "remote", r.RemoteAddr, "had_credentials", r.Header.Get("Authorization") != "")
+		s.Logger.Printf("DEBUG cwmp auth challenge remote=%s had_credentials=%v",
+			r.RemoteAddr, r.Header.Get("Authorization") != "")
 		s.Auth.Challenge(w)
 		w.WriteHeader(http.StatusUnauthorized)
 		return
@@ -211,7 +212,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case KindTransferComplete:
 		if err := s.Handler.TransferComplete(ctx, &ss.Session, &m.TransferComplete); err != nil {
-			s.Logger.Error("transfer complete", "device_id", ss.DeviceID, "err", err)
+			s.Logger.Printf("ERROR transfer complete device=%s err=%v", ss.DeviceID, err)
 			s.end(ss)
 			s.fail(w, r, http.StatusServiceUnavailable, "storage unavailable")
 			return
@@ -222,13 +223,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// CPE has nothing more to send; fall through to our requests.
 	default: // a response or fault to our request
 		if ss.inflight == nil {
-			s.Logger.Warn("unsolicited cpe message", "device_id", ss.DeviceID, "kind", m.Kind.String())
+			s.Logger.Printf("WARN unsolicited cpe message device=%s kind=%s", ss.DeviceID, m.Kind.String())
 			break
 		}
 		req := *ss.inflight
 		ss.inflight = nil
 		if err := s.Handler.Response(ctx, &ss.Session, req, m); err != nil {
-			s.Logger.Error("handle response", "device_id", ss.DeviceID, "err", err)
+			s.Logger.Printf("ERROR handle response device=%s err=%v", ss.DeviceID, err)
 			s.end(ss)
 			s.fail(w, r, http.StatusServiceUnavailable, "storage unavailable")
 			return
@@ -237,7 +238,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	req, ok, err := s.Handler.Next(ctx, &ss.Session)
 	if err != nil {
-		s.Logger.Error("next request", "device_id", ss.DeviceID, "err", err)
+		s.Logger.Printf("ERROR next request device=%s err=%v", ss.DeviceID, err)
 	}
 	if err != nil || !ok {
 		s.end(ss)
@@ -249,7 +250,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	id := ss.ID[:8] + "-" + strconv.FormatUint(ss.seq, 10)
 	out, err := appendRequest(s.buf(), ss.Version, id, &req)
 	if err != nil {
-		s.Logger.Error("encode request", "device_id", ss.DeviceID, "err", err)
+		s.Logger.Printf("ERROR encode request device=%s err=%v", ss.DeviceID, err)
 		s.end(ss)
 		s.write(w, r, nil, true)
 		return
@@ -306,7 +307,7 @@ func (s *Server) inform(w http.ResponseWriter, r *http.Request, ref *connRef, m 
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 	if err := s.Handler.Inform(r.Context(), &ss.Session, in); err != nil {
-		s.Logger.Error("record inform", "device_id", ss.DeviceID, "err", err)
+		s.Logger.Printf("ERROR record inform device=%s err=%v", ss.DeviceID, err)
 		s.end(ss)
 		w.Header().Set("Retry-After", "60")
 		s.fail(w, r, http.StatusServiceUnavailable, "storage unavailable")
@@ -398,7 +399,7 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request, body []byte, last
 }
 
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, code int, msg string) {
-	s.Logger.Warn("cwmp request rejected", "status", code, "remote", r.RemoteAddr, "reason", msg)
+	s.Logger.Printf("WARN cwmp request rejected status=%d remote=%s reason=%q", code, r.RemoteAddr, msg)
 	w.Header().Set("Connection", "close")
 	http.Error(w, msg, code)
 }

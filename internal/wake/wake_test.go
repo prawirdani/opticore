@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -335,7 +335,7 @@ func TestPasswordNotLogged(t *testing.T) {
 	srv := digestServer(t, &reqs)
 
 	var buf syncBuffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := log.New(&buf, "", 0)
 	w := New(time.Second, logger)
 	defer w.Close()
 	w.Window = 20 * time.Millisecond

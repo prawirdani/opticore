@@ -201,7 +201,7 @@ func (s *Store) MergeParams(ctx context.Context, deviceID string, params map[str
 	return nil
 }
 
-// SetCRCredentials stores the encrypted connection-request password.
+// SetCRCredentials stores the connection-request password.
 func (s *Store) SetCRCredentials(ctx context.Context, deviceID, user, encPassword string) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE devices
 		SET cr_username = $2, cr_password = $3, cr_set_at = now()

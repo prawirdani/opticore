@@ -2,14 +2,12 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
-	"log/slog"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -38,8 +36,7 @@ const usage = `usage: opticore [-env-file path] <command> [args]
   The daemon reads ./.env, or .env beside the binary, unless -env-file (or
   $OPTICORE_ENV_FILE) names another file. Real environment variables win.
 
-  serve [-d]                            run the daemon; -d detaches it
-  stop                                  stop every running opticore serve
+  serve                                 run the daemon in the foreground
   migrate                               apply database migrations
   tui                                   operator console (also the no-arg default)
   devices [--json] [--serial P] [--class C]
@@ -55,7 +52,6 @@ const usage = `usage: opticore [-env-file path] <command> [args]
   job cancel <id>
   job revert <id>                       revert every done set task of the job
   wake <serial|id>
-  logs [-n N] [-f]                      tail the daemon log (OPTICORE_LOG_FILE)
   version                               print the build version
 `
 
@@ -81,9 +77,9 @@ func main() {
 
 	switch cmd, args := args[0], args[1:]; cmd {
 	case "serve":
-		err = serve(ctx, args)
+		err = serve(ctx)
 	case "migrate":
-		err = withStore(ctx, func(s *store.Store, _ config.Config) error { return s.Migrate(ctx) })
+		err = cmdMigrate(ctx)
 	case "tui":
 		err = cmdTUI(ctx)
 	case "devices":
@@ -100,10 +96,6 @@ func main() {
 		err = cmdJob(ctx, args)
 	case "wake":
 		err = cmdWake(ctx, args)
-	case "logs":
-		err = cmdLogs(ctx, args)
-	case "stop":
-		err = cmdStop(os.Getenv, args)
 	case "version":
 		fmt.Println(version)
 	case "-h", "--help", "help":
@@ -146,58 +138,21 @@ func splitEnvFile(args []string) (rest []string, path string, err error) {
 	return rest, path, nil
 }
 
-// newLogger returns the JSON logger and a close func. An empty path keeps the
-// logs on stderr, which is what a container or systemd unit wants; a path
-// appends to a 0600 file so `opticore logs` and the TUI can read it.
-func newLogger(level, path string) (*slog.Logger, func(), error) {
-	var l slog.Level
-	_ = l.UnmarshalText([]byte(level))
-	opts := &slog.HandlerOptions{Level: l}
-	if path == "" {
-		return slog.New(slog.NewJSONHandler(os.Stderr, opts)), func() {}, nil
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return nil, nil, fmt.Errorf("log file %s: %w", path, err)
-	}
-	return slog.New(slog.NewJSONHandler(f, opts)), func() { f.Close() }, nil
-}
-
-func serve(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	daemon := fs.Bool("d", false, "run in the background")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 0 {
-		return errors.New("usage: serve [-d]")
-	}
+func serve(ctx context.Context) error {
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
 		return err
 	}
-	if *daemon {
-		return serveDaemon(cfg)
-	}
-	log, closeLog, err := newLogger(cfg.LogLevel, cfg.LogFile)
-	if err != nil {
+	logger := log.Default()
+
+	if err := ensureDatabase(ctx, cfg.DBDSN, logger); err != nil {
 		return err
 	}
-	defer closeLog()
-
 	st, err := store.Open(ctx, cfg.DBDSN)
 	if err != nil {
 		return err
 	}
 	defer st.Close()
-	pidPath := pidFile(os.Getenv)
-	if pid := livePID(pidPath); pid != 0 && pid != os.Getpid() {
-		return errAlreadyRunning(pid)
-	}
-	if err := writePID(pidPath); err != nil {
-		return err
-	}
-	defer removePID(pidPath)
 	st.TaskExpiry = cfg.TaskExpiry
 	if _, err := st.AcquireLeader(ctx); err != nil {
 		return err
@@ -206,15 +161,15 @@ func serve(ctx context.Context, args []string) error {
 		return err
 	}
 	if v, err := st.SchemaVersion(ctx); err == nil {
-		log.Info("database schema", "version", v)
+		logger.Printf("database schema version=%d", v)
 	}
-	log.Info("cwmp device security", "allow_cidrs", len(cfg.CWMPAllowCIDRs),
-		"cr_url_match_source", cfg.CWMPCRMatchSource, "device_auth", cfg.CWMPAuthUsername != "")
+	logger.Printf("cwmp device security allow_cidrs=%d cr_url_match_source=%v device_auth=%v",
+		len(cfg.CWMPAllowCIDRs), cfg.CWMPCRMatchSource, cfg.CWMPAuthUsername != "")
 
-	svc := &acs.Service{Store: st, Key: cfg.SecretKey, Waker: wake.New(cfg.CWMPCRTimeout, log), Logger: log,
+	svc := &acs.Service{Store: st, Waker: wake.New(cfg.CWMPCRTimeout, logger), Logger: logger,
 		PumpWindow: cfg.CWMPSessionTimeout}
 	sessions := &acs.Sessions{
-		Store: st, Svc: svc, Key: cfg.SecretKey, Logger: log,
+		Store: st, Svc: svc, Logger: logger,
 		GPVBatch: cfg.CWMPGPVBatch, MaxAttempts: cfg.TaskMaxAttempts,
 		CRMatchSource: cfg.CWMPCRMatchSource,
 		HookEvents:    cfg.HookEvents, HookPrefetch: cfg.HookPrefetch, HookTimeout: cfg.HookTimeout,
@@ -225,12 +180,12 @@ func serve(ctx context.Context, args []string) error {
 			return err
 		}
 		sessions.Hook = hc
-		log.Info("inform hook configured", "url", cfg.HookURL, "events", cfg.HookEvents,
-			"step_timeout", cfg.HookStepTimeout, "timeout", cfg.HookTimeout)
+		logger.Printf("inform hook configured url=%q events=%v step_timeout=%v timeout=%v",
+			cfg.HookURL, cfg.HookEvents, cfg.HookStepTimeout, cfg.HookTimeout)
 	}
 	cs := &cwmp.Server{
 		Handler:        sessions,
-		Logger:         log,
+		Logger:         logger,
 		MaxBody:        cfg.CWMPMaxBody,
 		SessionTimeout: cfg.CWMPSessionTimeout,
 		MaxSessions:    cfg.CWMPMaxSessions,
@@ -257,7 +212,7 @@ func serve(ctx context.Context, args []string) error {
 		IdleTimeout:       cfg.CWMPSessionTimeout,
 	}
 
-	apiSrv := api.New(st, svc, cfg.SecretKey, log)
+	apiSrv := api.New(st, svc, logger)
 	apiMux := http.NewServeMux()
 	apiMux.Handle("/", apiSrv.Handler())
 	apiMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -272,12 +227,12 @@ func serve(ctx context.Context, args []string) error {
 
 	janitorCtx, cancelJanitor := context.WithCancel(ctx)
 	defer cancelJanitor()
-	go janitor(janitorCtx, st, svc, log, cfg.TaskRetention, cfg.EventRetention)
+	go janitor(janitorCtx, st, svc, logger, cfg.TaskRetention, cfg.EventRetention)
 
 	errc := make(chan error, 2)
 	go func() { errc <- srv.ListenAndServe() }()
 	go func() { errc <- apiHTTP.ListenAndServe() }()
-	log.Info("opticore listening", "cwmp", cfg.CWMPAddr, "api", cfg.APIAddr)
+	logger.Printf("opticore listening cwmp=%s api=%s", cfg.CWMPAddr, cfg.APIAddr)
 
 	select {
 	case err := <-errc:
@@ -286,7 +241,7 @@ func serve(ctx context.Context, args []string) error {
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.CWMPSessionTimeout)
 	defer cancel()
-	log.Info("shutting down")
+	logger.Printf("shutting down")
 	apiSrv.Close()
 	apiErr := apiHTTP.Shutdown(shutdownCtx)
 	if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -308,7 +263,7 @@ func health(w http.ResponseWriter, r *http.Request, st *store.Store) {
 	json.NewEncoder(w).Encode(out)
 }
 
-func janitor(ctx context.Context, st *store.Store, svc *acs.Service, log *slog.Logger, taskRetention, eventRetention time.Duration) {
+func janitor(ctx context.Context, st *store.Store, svc *acs.Service, logger *log.Logger, taskRetention, eventRetention time.Duration) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	var lastPurge time.Time
@@ -318,96 +273,24 @@ func janitor(ctx context.Context, st *store.Store, svc *acs.Service, log *slog.L
 			return
 		case now := <-t.C:
 			if n, err := st.ExpireTasks(ctx); err != nil {
-				log.Error("janitor: expire tasks", "err", err)
+				logger.Printf("ERROR janitor: expire tasks err=%v", err)
 			} else if n > 0 {
-				log.Info("janitor: expired tasks", "count", n)
+				logger.Printf("janitor: expired tasks count=%d", n)
 			}
 			if err := svc.PumpJobs(ctx); err != nil {
-				log.Error("janitor: pump jobs", "err", err)
+				logger.Printf("ERROR janitor: pump jobs err=%v", err)
 			}
 			if now.Sub(lastPurge) < time.Hour {
 				continue
 			}
 			lastPurge = now
 			if nt, ne, err := st.PurgeOld(ctx, taskRetention, eventRetention); err != nil {
-				log.Error("janitor: purge", "err", err)
+				logger.Printf("ERROR janitor: purge err=%v", err)
 			} else if nt+ne > 0 {
-				log.Info("janitor: purged old rows", "tasks", nt, "events", ne)
+				logger.Printf("janitor: purged old rows tasks=%d events=%d", nt, ne)
 			}
 		}
 	}
-}
-
-// cmdLogs prints the daemon log file, or follows it with -f. The daemon writes
-// there only when OPTICORE_LOG_FILE is set; stderr stays the default.
-func cmdLogs(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
-	n := fs.Int("n", 100, "number of lines to show")
-	follow := fs.Bool("f", false, "follow new lines")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 0 {
-		return errors.New("usage: logs [-n N] [-f]")
-	}
-	path := strings.TrimSpace(os.Getenv("OPTICORE_LOG_FILE"))
-	if path == "" {
-		return errors.New("no log file: set OPTICORE_LOG_FILE so the daemon appends its JSON logs there")
-	}
-	lines, err := tailLines(path, *n)
-	if err != nil {
-		return err
-	}
-	for _, l := range lines {
-		fmt.Println(l)
-	}
-	if !*follow {
-		return nil
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := f.Seek(0, io.SeekEnd); err != nil {
-		return err
-	}
-	r := bufio.NewReader(f)
-	for {
-		line, err := r.ReadString('\n')
-		if line != "" {
-			fmt.Print(line)
-		}
-		switch {
-		case err == nil:
-		case errors.Is(err, io.EOF):
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(400 * time.Millisecond):
-			}
-		default:
-			return err
-		}
-	}
-}
-
-// tailLines returns the last n lines of path. shortcut: it reads the whole
-// file; a log rotated at a gigabyte wants a seek from the end.
-func tailLines(path string, n int) ([]string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("log file %s: %w", path, err)
-	}
-	text := strings.TrimRight(string(b), "\n")
-	if text == "" {
-		return nil, nil
-	}
-	lines := strings.Split(text, "\n")
-	if n > 0 && len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return lines, nil
 }
 
 // cmdTUI runs the operator console. Its one write, a wake, goes through
@@ -420,12 +303,7 @@ func cmdTUI(ctx context.Context) error {
 			Params:  tuiParams{st: st},
 			Wake:    svc.Wake,
 			Enqueue: svc.Enqueue,
-			Logs: func(ctx context.Context, n int) ([]string, error) {
-				if cfg.LogFile == "" {
-					return nil, errors.New("no log file: set OPTICORE_LOG_FILE so the daemon writes one")
-				}
-				return tailLines(cfg.LogFile, n)
-			},
+			Serving: st.DaemonRunning,
 		})
 	})
 }
@@ -459,6 +337,34 @@ func isTerminal() bool {
 	return true
 }
 
+// cmdMigrate creates the database if it is missing, then applies migrations.
+func cmdMigrate(ctx context.Context) error {
+	cfg, err := config.LoadClient(os.Getenv)
+	if err != nil {
+		return err
+	}
+	if err := ensureDatabase(ctx, cfg.DBDSN, log.Default()); err != nil {
+		return err
+	}
+	st, err := store.Open(ctx, cfg.DBDSN)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	return st.Migrate(ctx)
+}
+
+func ensureDatabase(ctx context.Context, dsn string, logger *log.Logger) error {
+	created, err := store.EnsureDatabase(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	if created {
+		logger.Printf("database created")
+	}
+	return nil
+}
+
 func withStore(ctx context.Context, fn func(*store.Store, config.Config) error) error {
 	cfg, err := config.LoadClient(os.Getenv)
 	if err != nil {
@@ -473,9 +379,9 @@ func withStore(ctx context.Context, fn func(*store.Store, config.Config) error) 
 }
 
 func service(st *store.Store, cfg config.Config) *acs.Service {
-	log, _, _ := newLogger(cfg.LogLevel, "") // stderr: never fails
-	return &acs.Service{Store: st, Key: cfg.SecretKey,
-		Waker: wake.New(cfg.CWMPCRTimeout, log), Logger: log}
+	logger := log.Default()
+	return &acs.Service{Store: st,
+		Waker: wake.New(cfg.CWMPCRTimeout, logger), Logger: logger}
 }
 
 func printJSON(v any) error {

@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -93,19 +93,10 @@ func testStore(t *testing.T) *store.Store {
 	return s
 }
 
-func testKey() []byte {
-	key := make([]byte, 32)
-	for i := range key {
-		key[i] = byte(i + 1)
-	}
-	return key
-}
-
 func newTestServer(t *testing.T, st *store.Store) (*Server, *httptest.Server, *acs.Service) {
 	t.Helper()
-	key := testKey()
-	svc := &acs.Service{Store: st, Key: key}
-	srv := New(st, svc, key, slog.New(slog.DiscardHandler))
+	svc := &acs.Service{Store: st}
+	srv := New(st, svc, log.New(io.Discard, "", 0))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(srv.Close)
@@ -426,6 +417,7 @@ func TestTaskRevealMasksSecrets(t *testing.T) {
 	resp := request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/tasks",
 		map[string]any{"name": "set", "args": map[string]any{"values": [][]string{
 			{"InternetGatewayDevice.ManagementServer.Password", "hunter2", "xsd:string"},
+			{"InternetGatewayDevice.ManagementServer.Username", "visibleuser", "xsd:string"},
 		}}})
 	var created struct {
 		Data []struct {
@@ -436,12 +428,17 @@ func TestTaskRevealMasksSecrets(t *testing.T) {
 		t.Fatalf("create = %d", resp.StatusCode)
 	}
 	decode(t, resp, &created)
+	if err := st.SetTaskPrev(context.Background(), created.Data[0].ID, json.RawMessage(
+		`{"InternetGatewayDevice.ManagementServer.Password":["oldsecret","xsd:string"],"InternetGatewayDevice.ManagementServer.Username":["olduser","xsd:string"]}`)); err != nil {
+		t.Fatal(err)
+	}
 
 	var task struct {
 		Data struct {
 			Args struct {
 				Values [][]string `json:"values"`
 			} `json:"args"`
+			Prev map[string][]string `json:"prev"`
 		} `json:"data"`
 	}
 	resp = request(t, ts.Client(), http.MethodGet,
@@ -450,12 +447,24 @@ func TestTaskRevealMasksSecrets(t *testing.T) {
 	if task.Data.Args.Values[0][1] != "••••" {
 		t.Errorf("masked task arg = %q", task.Data.Args.Values[0][1])
 	}
+	if task.Data.Args.Values[1][1] != "visibleuser" {
+		t.Errorf("non-secret task arg = %q, want visible", task.Data.Args.Values[1][1])
+	}
+	if task.Data.Prev["InternetGatewayDevice.ManagementServer.Password"][0] != "••••" {
+		t.Errorf("masked prev = %q", task.Data.Prev["InternetGatewayDevice.ManagementServer.Password"][0])
+	}
+	if task.Data.Prev["InternetGatewayDevice.ManagementServer.Username"][0] != "olduser" {
+		t.Errorf("non-secret prev = %q, want olduser", task.Data.Prev["InternetGatewayDevice.ManagementServer.Username"][0])
+	}
 
 	resp = request(t, ts.Client(), http.MethodGet,
 		fmt.Sprintf("%s/v1/tasks/%d?reveal=1", ts.URL, created.Data[0].ID), nil)
 	decode(t, resp, &task)
 	if task.Data.Args.Values[0][1] != "hunter2" {
 		t.Errorf("revealed task arg = %q", task.Data.Args.Values[0][1])
+	}
+	if task.Data.Prev["InternetGatewayDevice.ManagementServer.Password"][0] != "oldsecret" {
+		t.Errorf("revealed prev = %q", task.Data.Prev["InternetGatewayDevice.ManagementServer.Password"][0])
 	}
 }
 

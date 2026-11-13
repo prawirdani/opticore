@@ -37,8 +37,8 @@ func TestRevertTaskRestoresPrevValues(t *testing.T) {
 		t.Fatalf("tasks = %+v, %v", ts, err)
 	}
 	orig := ts[0]
-	if strings.Contains(string(orig.Prev), "oldpass") || !strings.Contains(string(orig.Prev), encPrefix) {
-		t.Fatalf("prev not sealed at rest: %s", orig.Prev)
+	if !strings.Contains(string(orig.Prev), "oldpass") || strings.Contains(string(orig.Prev), "enc:") {
+		t.Fatalf("prev not stored raw: %s", orig.Prev)
 	}
 
 	out, err := h.svc.RevertTask(ctx, serial, orig.ID, nil)
@@ -48,8 +48,8 @@ func TestRevertTaskRestoresPrevValues(t *testing.T) {
 	if len(out) != 1 || out[0].Name != "set" || out[0].Status != "pending" {
 		t.Fatalf("revert tasks = %+v", out)
 	}
-	if strings.Contains(string(out[0].Args), "oldpass") || !strings.Contains(string(out[0].Args), encPrefix) {
-		t.Errorf("revert args not sealed at rest: %s", out[0].Args)
+	if !strings.Contains(string(out[0].Args), "oldpass") || strings.Contains(string(out[0].Args), "enc:") {
+		t.Errorf("revert args not stored raw: %s", out[0].Args)
 	}
 
 	// The device now holds the values the original set wrote.
@@ -178,7 +178,7 @@ func TestRevertJobKeepsMaxParallel(t *testing.T) {
 	}
 
 	fake := &countingWaker{}
-	svc := &Service{Store: st, Key: testKey, Waker: fake, PumpWindow: 20 * time.Millisecond}
+	svc := &Service{Store: st, Waker: fake, PumpWindow: 20 * time.Millisecond}
 	job, tasks, err := svc.CreateJob(ctx, store.NewJob{
 		Name:     "set-all",
 		Selector: store.JobSelector{Serials: []string{"S1", "S2", "S3"}},

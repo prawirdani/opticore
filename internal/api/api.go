@@ -17,7 +17,7 @@ package api
 
 import (
 	"encoding/json"
-	"log/slog"
+	"log"
 	"net/http"
 	"sync"
 
@@ -29,23 +29,21 @@ import (
 type Server struct {
 	st  *store.Store
 	svc *acs.Service
-	key []byte
-	log *slog.Logger
+	log *log.Logger
 
 	shutdown chan struct{}
 	once     sync.Once
 }
 
 // New builds the API server. The caller owns st and svc.
-func New(st *store.Store, svc *acs.Service, key []byte, log *slog.Logger) *Server {
-	if log == nil {
-		log = slog.Default()
+func New(st *store.Store, svc *acs.Service, logger *log.Logger) *Server {
+	if logger == nil {
+		logger = log.Default()
 	}
 	return &Server{
 		st:       st,
 		svc:      svc,
-		key:      key,
-		log:      log,
+		log:      logger,
 		shutdown: make(chan struct{}),
 	}
 }

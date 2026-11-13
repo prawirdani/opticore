@@ -11,9 +11,9 @@ make itest                    # the real suite: needs OPTICORE_TEST_DSN (set in 
 gofmt -l . && go vet ./...   # what CI checks besides the tests
 ```
 
-`./bin/opticore serve -d` detaches and `./bin/opticore stop` shuts it down
-gracefully — no `nohup` and no `pkill`, which can match your own shell. The
-pid file follows `OPTICORE_LOG_FILE`, so both commands agree.
+`./bin/opticore serve` is a foreground process that logs to stderr; start it in
+a background shell or tmux for a dev loop, and kill it by its pid (not `pkill
+-f`, which can match your own shell). No pid file, no daemon mode.
 
 The binary loads `./.env` by itself (`-env-file path` or `OPTICORE_ENV_FILE`
 for another file; real environment variables win). `go test` does **not**, so
@@ -29,10 +29,6 @@ set -a; . ./.env; set +a
 or `go test -race -count=1 ./internal/acs/` for one package. Each test binary
 creates its own PostgreSQL schema and drops it, so tests may share one database
 and run in parallel.
-
-`OPTICORE_LOG_FILE` in `.env` makes the daemon append JSON logs to a file;
-`opticore logs [-n N] [-f]` tails it and the TUI's fourth tab shows the same
-lines. Without it the daemon logs to stderr only.
 
 `.env` is gitignored and holds the dev DSN (local container `pg18.1`, databases
 `opticore` and `opticore_test`). Dev ports are `17547`/`18081` because a local
@@ -50,7 +46,7 @@ GenieACS owns `7547`; the built-in defaults are still `7547`/`8081`.
 - `internal/hook` — the daemon's side of the hook call.
 - `internal/api` — `/v1` handlers and SSE. No auth: the listener address is the
   boundary.
-- `internal/store` — hand-written SQL, secret sealing, migrations runner.
+- `internal/store` — hand-written SQL, `IsSecretPath`, migrations runner.
 - `internal/tui` — operator console over `Deps` interfaces; no SQL of its own,
   writes go through `acs.Service`. Its tests are pure (fake readers), so they
   run under plain `make test`.
@@ -66,9 +62,10 @@ GenieACS owns `7547`; the built-in defaults are still `7547`/`8081`.
 - Wire shape must stay byte-compatible with GenieACS (unprefixed body children,
   `<string>` arrays, `OUI-ProductClass-Serial`). Never use `encoding/xml` in the
   production path; it is only the test oracle for the hand-written scanner.
-- Leaves ending in `password|passphrase|secret|psk|key` are sealed with
-  `OPTICORE_SECRET_KEY` and rendered `••••` unless the request asks `reveal=1`.
-  Do not log or return them.
+- Leaves ending in `password|passphrase|secret|psk|key` are secrets. They are
+  stored as written (no encryption at rest, by decision) and masked to `••••`
+  on every read unless the request asks `reveal=1`; masking is by
+  `store.IsSecretPath`. Do not log them.
 - Handler calls for one session are sequential, and at most one RPC is in
   flight. Do not add per-session goroutines.
 - One daemon per database, enforced by a PostgreSQL advisory lock. Never start

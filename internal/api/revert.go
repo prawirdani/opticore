@@ -49,7 +49,7 @@ func (s *Server) revertJob(w http.ResponseWriter, r *http.Request) {
 	}
 	// Like createJob: wake only up to the new job's max_parallel.
 	if err := s.svc.PumpJobs(r.Context()); err != nil {
-		s.log.Error("pump jobs after revert", "err", err)
+		s.log.Printf("ERROR pump jobs after revert err=%v", err)
 	}
 	counts, err := s.st.JobCounts(r.Context(), job.ID)
 	if err != nil {

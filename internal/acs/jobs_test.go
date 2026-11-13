@@ -45,7 +45,7 @@ func TestPumpJobsHonoursMaxParallel(t *testing.T) {
 	}
 
 	fake := &countingWaker{}
-	svc := &Service{Store: st, Key: testKey, Waker: fake, PumpWindow: 20 * time.Millisecond}
+	svc := &Service{Store: st, Waker: fake, PumpWindow: 20 * time.Millisecond}
 	job, tasks, err := svc.CreateJob(ctx, store.NewJob{
 		Name:     "reboot-all",
 		Selector: store.JobSelector{Serials: []string{"S1", "S2", "S3"}},

@@ -283,3 +283,53 @@ func scanTasks(rows pgx.Rows) ([]Task, error) {
 
 // Pool exposes the connection pool for test setup (truncation, fixtures).
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
+
+// DaemonRunning reports whether some session holds the single-daemon advisory
+// lock, i.e. an `opticore serve` is up against this database. It reads
+// pg_locks instead of trying the lock, so a caller never takes it by accident.
+func (s *Store) DaemonRunning(ctx context.Context) (bool, error) {
+	var held bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM pg_locks
+		WHERE locktype = 'advisory' AND granted AND objsubid = 1 -- the bigint form
+		  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+		  AND ((classid::bigint << 32) | objid::bigint) = $1)`, leaderLockKey).Scan(&held)
+	if err != nil {
+		return false, fmt.Errorf("store: daemon running: %w", err)
+	}
+	return held, nil
+}
+
+// EnsureDatabase creates the database named in dsn when the server reports it
+// does not exist (SQLSTATE 3D000), using the same credentials against the
+// "postgres" maintenance database. It is for `migrate` and `serve` only; the
+// role needs CREATEDB, and any other connection error is returned unchanged.
+func EnsureDatabase(ctx context.Context, dsn string) (created bool, err error) {
+	conn, err := pgx.Connect(ctx, dsn)
+	if err == nil {
+		conn.Close(ctx)
+		return false, nil
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "3D000" {
+		return false, fmt.Errorf("store: connect: %w", err)
+	}
+	cfg, perr := pgx.ParseConfig(dsn)
+	if perr != nil {
+		return false, fmt.Errorf("store: parse dsn: %w", perr)
+	}
+	name := cfg.Database
+	cfg.Database = "postgres"
+	admin, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		return false, fmt.Errorf("store: create database %q: connect to postgres: %w", name, err)
+	}
+	defer admin.Close(ctx)
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize()); err != nil {
+		if errors.As(err, &pgErr) && pgErr.Code == "42P04" { // created meanwhile
+			return false, nil
+		}
+		return false, fmt.Errorf("store: create database %q: %w", name, err)
+	}
+	return true, nil
+}

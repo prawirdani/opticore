@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -46,7 +46,7 @@ type Target struct {
 type Waker struct {
 	client  *http.Client
 	timeout time.Duration
-	logger  *slog.Logger
+	logger  *log.Logger
 
 	// Window is the coalescing delay for Request. Default 500 ms.
 	Window time.Duration
@@ -61,12 +61,12 @@ type Waker struct {
 
 // New builds a Waker. A non-positive timeout defaults to 2 s. A nil logger is
 // discarded.
-func New(timeout time.Duration, logger *slog.Logger) *Waker {
+func New(timeout time.Duration, logger *log.Logger) *Waker {
 	if timeout <= 0 {
 		timeout = 2 * time.Second
 	}
 	if logger == nil {
-		logger = slog.New(slog.DiscardHandler)
+		logger = log.New(io.Discard, "", 0)
 	}
 	return &Waker{
 		client: &http.Client{
@@ -190,17 +190,12 @@ func (w *Waker) run(t Target) {
 	defer cancel()
 
 	err := w.Wake(ctx, t)
-	attrs := []any{
-		"device_id", t.DeviceID,
-		"url", t.URL,
-		"err", err,
-		"duration", time.Since(start),
-	}
 	if err != nil {
-		w.logger.Warn("wake failed", attrs...)
+		w.logger.Printf("WARN wake failed device=%s url=%s err=%v duration=%v",
+			t.DeviceID, t.URL, err, time.Since(start))
 		return
 	}
-	w.logger.Info("wake ok", attrs...)
+	w.logger.Printf("wake ok device=%s url=%s duration=%v", t.DeviceID, t.URL, time.Since(start))
 }
 
 // attempt sends the request and retries once on a network error.

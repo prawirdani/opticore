@@ -86,12 +86,12 @@ func (s *Server) sseStart(ctx context.Context, cursor string) sseCursor {
 	if cursor == "" {
 		now, err := s.st.Now(ctx)
 		if err != nil {
-			s.log.Error("sse: start cursor", "err", err)
+			s.log.Printf("ERROR sse: start cursor err=%v", err)
 			now = time.Now()
 		}
 		lastEvent, err := s.st.MaxEventID(ctx)
 		if err != nil {
-			s.log.Error("sse: max event id", "err", err)
+			s.log.Printf("ERROR sse: max event id err=%v", err)
 		}
 		return sseCursor{eventID: lastEvent, taskAt: now, taskID: math.MaxInt64,
 			jobAt: now, jobID: math.MaxInt64}
@@ -103,7 +103,7 @@ func (s *Server) sseStart(ctx context.Context, cursor string) sseCursor {
 		}
 		at, err := s.st.EventAt(ctx, id)
 		if err != nil {
-			s.log.Error("sse: event at", "err", err)
+			s.log.Printf("ERROR sse: event at err=%v", err)
 		}
 		if at.IsZero() {
 			at, _ = s.st.Now(ctx)
@@ -118,7 +118,7 @@ func (s *Server) sseStart(ctx context.Context, cursor string) sseCursor {
 		}
 		lastEvent, err := s.st.MaxEventIDAt(ctx, at)
 		if err != nil {
-			s.log.Error("sse: max event id at", "err", err)
+			s.log.Printf("ERROR sse: max event id at err=%v", err)
 		}
 		return sseCursor{eventID: lastEvent, taskAt: at, taskID: id, jobAt: at, jobID: -1}
 	}
@@ -129,7 +129,7 @@ func (s *Server) sseStart(ctx context.Context, cursor string) sseCursor {
 		}
 		lastEvent, err := s.st.MaxEventIDAt(ctx, at)
 		if err != nil {
-			s.log.Error("sse: max event id at", "err", err)
+			s.log.Printf("ERROR sse: max event id at err=%v", err)
 		}
 		return sseCursor{eventID: lastEvent, taskAt: at, taskID: -1, jobAt: at, jobID: id}
 	}
@@ -158,7 +158,7 @@ func (s *Server) ssePump(ctx context.Context, w http.ResponseWriter, flusher htt
 	for {
 		events, err := s.st.EventsSinceID(ctx, cur.eventID, sseBatch)
 		if err != nil {
-			s.log.Error("sse: events", "err", err)
+			s.log.Printf("ERROR sse: events err=%v", err)
 			return
 		}
 		for _, e := range events {
@@ -180,7 +180,7 @@ func (s *Server) ssePump(ctx context.Context, w http.ResponseWriter, flusher htt
 	for {
 		tasks, err := s.st.TasksUpdatedSince(ctx, cur.taskAt, cur.taskID, sseBatch)
 		if err != nil {
-			s.log.Error("sse: tasks", "err", err)
+			s.log.Printf("ERROR sse: tasks err=%v", err)
 			return
 		}
 		for _, t := range tasks {
@@ -209,7 +209,7 @@ func (s *Server) ssePump(ctx context.Context, w http.ResponseWriter, flusher htt
 	for {
 		jobs, err := s.st.JobsUpdatedSince(ctx, cur.jobAt, cur.jobID, sseBatch)
 		if err != nil {
-			s.log.Error("sse: jobs", "err", err)
+			s.log.Printf("ERROR sse: jobs err=%v", err)
 			return
 		}
 		for _, j := range jobs {
@@ -223,12 +223,12 @@ func (s *Server) ssePump(ctx context.Context, w http.ResponseWriter, flusher htt
 			}
 			counts, err := s.st.JobCounts(ctx, j.ID)
 			if err != nil {
-				s.log.Error("sse: job counts", "err", err)
+				s.log.Printf("ERROR sse: job counts err=%v", err)
 				return
 			}
 			failures, err := s.st.JobFailures(ctx, j.ID)
 			if err != nil {
-				s.log.Error("sse: job failures", "err", err)
+				s.log.Printf("ERROR sse: job failures err=%v", err)
 				return
 			}
 			id := "j" + strconv.FormatInt(j.ID, 10) + ":" +

@@ -15,7 +15,7 @@ import (
 )
 
 // doneSet creates a finished set task with prev through the service, so the
-// stored args are sealed exactly as the API would write them.
+// stored args are written exactly as the API would write them.
 func doneSet(t *testing.T, st *store.Store, svc *acs.Service, device, prev string) store.Task {
 	t.Helper()
 	ctx := context.Background()
@@ -33,15 +33,6 @@ func doneSet(t *testing.T, st *store.Store, svc *acs.Service, device, prev strin
 		t.Fatalf("FinishTask: %v", err)
 	}
 	return tasks[0]
-}
-
-func sealedPrev(t *testing.T, value string) string {
-	t.Helper()
-	sealed, err := store.SealSecret(testKey(), []byte(value))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return "enc:" + sealed
 }
 
 func postRevert(t *testing.T, ts *httptest.Server, url, idem string) *http.Response {
@@ -67,9 +58,8 @@ func TestRevertTaskAPI(t *testing.T) {
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", now, "")
 	seedDevice(t, st, "00259E-HG8145V5-SER2", "SER2", now, "")
 
-	sealed := sealedPrev(t, "oldsecret")
 	orig := doneSet(t, st, svc, "SER1",
-		`{"InternetGatewayDevice.ManagementServer.Password":["`+sealed+`","xsd:string"]}`)
+		`{"InternetGatewayDevice.ManagementServer.Password":["oldsecret","xsd:string"]}`)
 
 	url := fmt.Sprintf("%s/v1/devices/SER1/tasks/%d/revert", ts.URL, orig.ID)
 	resp := postRevert(t, ts, url, "")
@@ -92,17 +82,16 @@ func TestRevertTaskAPI(t *testing.T) {
 	}
 	revertID := body.Data[0].ID
 
-	// The new task decrypts and re-seals: no plaintext at rest, but a usable
-	// sealed value for the device session.
+	// The new task stores the raw value; the device receives it as written.
 	got, err := st.GetTask(context.Background(), revertID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(got.Args), "oldsecret") {
-		t.Errorf("revert args stored plaintext: %s", got.Args)
+	if !strings.Contains(string(got.Args), "oldsecret") {
+		t.Errorf("revert args not stored raw: %s", got.Args)
 	}
-	if !strings.Contains(string(got.Args), "enc:") {
-		t.Errorf("revert args not sealed: %s", got.Args)
+	if strings.Contains(string(got.Args), "enc:") {
+		t.Errorf("revert args still sealed: %s", got.Args)
 	}
 	if body.Data[0].Args.Values[0][1] != "••••" {
 		t.Errorf("response args = %+v, want the secret masked", body.Data[0].Args.Values)

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -14,9 +15,6 @@ import (
 	"github.com/prawirdani/opticore/internal/store"
 	"github.com/prawirdani/opticore/internal/wake"
 )
-
-// encPrefix marks a task arg or prev value sealed with the secret key.
-const encPrefix = "enc:"
 
 // SetArgs is the args of a set task: [[path, value, type], ...].
 type SetArgs struct {
@@ -41,14 +39,11 @@ type Waker interface {
 }
 
 // Service creates tasks and wakes devices. It is shared by the CLI and,
-// later, the HTTP API, so validation and encryption cannot diverge.
+// later, the HTTP API, so validation cannot diverge.
 type Service struct {
 	Store  *store.Store
-	Key    []byte
 	Waker  Waker // nil: never wake
-	Logger interface {
-		Warn(msg string, args ...any)
-	}
+	Logger *log.Logger
 
 	// PumpWindow suppresses re-waking a job task for this long. Zero means
 	// five minutes, roughly one CWMP session timeout.
@@ -62,8 +57,8 @@ type Service struct {
 // which Opticore owns (§5).
 var ErrReservedPath = errors.New("connection-request credentials are managed by the ACS")
 
-// CreateTasks validates, seals secret values and stores tasks; more than one
-// task forms an ordered batch. It does not wake the device.
+// CreateTasks validates and stores tasks; more than one task forms an
+// ordered batch. It does not wake the device.
 func (svc *Service) CreateTasks(ctx context.Context, idOrSerial string, tasks []store.NewTask) ([]store.Task, error) {
 	for i := range tasks {
 		if err := svc.prepare(&tasks[i]); err != nil {
@@ -121,13 +116,6 @@ func (svc *Service) prepare(t *store.NewTask) error {
 			}
 			if len(v) == 2 {
 				a.Values[i] = append(v, "xsd:string")
-			}
-			if store.IsSecretPath(v[0]) && !strings.HasPrefix(v[1], encPrefix) {
-				sealed, err := store.SealSecret(svc.Key, []byte(v[1]))
-				if err != nil {
-					return err
-				}
-				a.Values[i][1] = encPrefix + sealed
 			}
 		}
 		b, err := json.Marshal(a)
@@ -189,20 +177,13 @@ func (svc *Service) wakeTarget(ctx context.Context, idOrSerial string) (wake.Tar
 	if d.CRURL == "" {
 		return wake.Target{}, errors.New("device has not reported a ConnectionRequestURL")
 	}
-	t := wake.Target{DeviceID: d.ID, URL: d.CRURL, Username: d.CRUsername}
-	if d.CRPassword != "" {
-		p, err := store.OpenSecret(svc.Key, d.CRPassword)
-		if err != nil {
-			return wake.Target{}, fmt.Errorf("decrypt connection-request password: %w", err)
-		}
-		t.Password = string(p)
-	}
+	t := wake.Target{DeviceID: d.ID, URL: d.CRURL, Username: d.CRUsername, Password: d.CRPassword}
 	return t, nil
 }
 
 func (svc *Service) warn(msg, deviceID string, err error) {
 	if svc.Logger != nil {
-		svc.Logger.Warn(msg, "device_id", deviceID, "err", err)
+		svc.Logger.Printf("WARN %s device=%s err=%v", msg, deviceID, err)
 	}
 }
 

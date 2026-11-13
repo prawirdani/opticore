@@ -3,7 +3,6 @@
 package config
 
 import (
-	"encoding/base64"
 	"fmt"
 	"net"
 	"net/netip"
@@ -15,8 +14,7 @@ import (
 
 // Config holds every environment variable the daemon understands.
 type Config struct {
-	DBDSN     string
-	SecretKey []byte // AES-256-GCM key, decoded from base64
+	DBDSN string
 
 	CWMPAddr           string
 	CWMPGPVBatch       int
@@ -43,9 +41,6 @@ type Config struct {
 	TaskMaxAttempts int
 	TaskRetention   time.Duration
 	EventRetention  time.Duration
-
-	LogLevel string
-	LogFile  string // JSON log destination; empty means stderr
 }
 
 // ValidationError lists every problem found while loading configuration.
@@ -198,19 +193,10 @@ func Load(getenv func(string) string) (Config, error) {
 		TaskMaxAttempts:    l.integer("OPTICORE_TASK_MAX_ATTEMPTS", 5),
 		TaskRetention:      l.dur("OPTICORE_TASK_RETENTION", 720*time.Hour),
 		EventRetention:     l.dur("OPTICORE_EVENT_RETENTION", 720*time.Hour),
-		LogLevel:           strings.ToLower(l.str("OPTICORE_LOG_LEVEL", "info")),
-		LogFile:            l.str("OPTICORE_LOG_FILE", ""),
 	}
 
 	if cfg.DBDSN == "" {
 		l.fail("OPTICORE_DB_DSN is required")
-	}
-	cfg.SecretKey = l.secretKey()
-
-	switch cfg.LogLevel {
-	case "debug", "info", "warn", "error":
-	default:
-		l.fail("OPTICORE_LOG_LEVEL: %q is not one of debug, info, warn, error", cfg.LogLevel)
 	}
 
 	if (cfg.CWMPAuthUsername == "") != (cfg.CWMPAuthPassword == "") {
@@ -238,41 +224,17 @@ func Load(getenv func(string) string) (Config, error) {
 func LoadClient(getenv func(string) string) (Config, error) {
 	l := &loader{getenv: getenv}
 	cfg := Config{
-		DBDSN:    l.str("OPTICORE_DB_DSN", ""),
-		LogLevel: strings.ToLower(l.str("OPTICORE_LOG_LEVEL", "info")),
-		LogFile:  l.str("OPTICORE_LOG_FILE", ""),
+		DBDSN: l.str("OPTICORE_DB_DSN", ""),
 		// Only the TUI needs this, for its wake action.
 		CWMPCRTimeout: l.dur("CWMP_CR_TIMEOUT", 2*time.Second),
 	}
 	if cfg.DBDSN == "" {
 		l.fail("OPTICORE_DB_DSN is required")
 	}
-	cfg.SecretKey = l.secretKey()
 	if len(l.problems) > 0 {
 		return cfg, &ValidationError{Problems: l.problems}
 	}
 	return cfg, nil
-}
-
-func (l *loader) secretKey() []byte {
-	raw := strings.TrimSpace(l.getenv("OPTICORE_SECRET_KEY"))
-	if raw == "" {
-		l.fail("OPTICORE_SECRET_KEY is required")
-		return nil
-	}
-	for _, enc := range []*base64.Encoding{
-		base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding,
-	} {
-		if key, err := enc.DecodeString(raw); err == nil {
-			if len(key) != 32 {
-				l.fail("OPTICORE_SECRET_KEY must decode to 32 bytes, got %d", len(key))
-				return nil
-			}
-			return key
-		}
-	}
-	l.fail("OPTICORE_SECRET_KEY is not valid base64")
-	return nil
 }
 
 var sizeRE = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z]*)$`)

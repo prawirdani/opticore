@@ -70,9 +70,9 @@ func (s *Server) deviceView(d store.Device, now time.Time, reveal bool) deviceJS
 	}
 }
 
-func paramView(p store.Param, reveal bool) paramJSON {
+func paramView(path string, p store.Param, reveal bool) paramJSON {
 	v := p.Value
-	if p.Secret || (!reveal && strings.HasPrefix(v, "enc:")) {
+	if p.Secret || (!reveal && store.IsSecretPath(path)) {
 		v = "••••"
 	}
 	return paramJSON{Value: v, Type: p.Type, Writable: p.Writable, UpdatedAt: p.UpdatedAt}
@@ -129,7 +129,7 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 	out := s.deviceView(d, time.Now(), reveal)
 	params := make(map[string]paramJSON, len(d.Params))
 	for path, p := range d.Params {
-		params[path] = paramView(p, reveal)
+		params[path] = paramView(path, p, reveal)
 	}
 	out.Params = &params
 	summary, err := s.st.TaskSummary(r.Context(), d.ID)
@@ -167,7 +167,7 @@ func (s *Server) listParams(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]paramEntry, 0, len(paths))
 	for _, path := range paths {
-		out = append(out, paramEntry{Path: path, paramJSON: paramView(d.Params[path], reveal)})
+		out = append(out, paramEntry{Path: path, paramJSON: paramView(path, d.Params[path], reveal)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
 }
@@ -239,7 +239,7 @@ func (s *Server) deviceError(w http.ResponseWriter, err error) {
 }
 
 func (s *Server) internal(w http.ResponseWriter, what string, err error) {
-	s.log.Error(what, "err", err)
+	s.log.Printf("ERROR %s err=%v", what, err)
 	writeError(w, http.StatusInternalServerError, "INTERNAL", "internal error")
 }
 

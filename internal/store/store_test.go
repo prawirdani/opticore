@@ -7,10 +7,13 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/prawirdani/opticore/migrations"
 )
 
 var testDSN string // schema-scoped DSN; empty when integration tests are skipped
@@ -344,6 +347,9 @@ func TestCreateTasksIdempotencyAndCancel(t *testing.T) {
 func TestAdvisoryLock(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
+	if up, err := s.DaemonRunning(ctx); err != nil || up {
+		t.Fatalf("DaemonRunning before the lock = %v, %v; want false", up, err)
+	}
 	release, err := s.AcquireLeader(ctx)
 	if err != nil {
 		t.Fatalf("AcquireLeader: %v", err)
@@ -358,7 +364,15 @@ func TestAdvisoryLock(t *testing.T) {
 		t.Fatalf("second AcquireLeader = %v, want ErrAnotherDaemon", err)
 	}
 
+	// The check reads pg_locks from another connection without taking the lock.
+	if up, err := other.DaemonRunning(ctx); err != nil || !up {
+		t.Fatalf("DaemonRunning while held = %v, %v; want true", up, err)
+	}
+
 	release()
+	if up, err := other.DaemonRunning(ctx); err != nil || up {
+		t.Fatalf("DaemonRunning after release = %v, %v; want false", up, err)
+	}
 	if _, err := other.AcquireLeader(ctx); err != nil {
 		t.Fatalf("AcquireLeader after release: %v", err)
 	}
@@ -416,5 +430,63 @@ func TestPurgeOld(t *testing.T) {
 	}
 	if nt, ne, _ := s.PurgeOld(ctx, 0, 0); nt != 0 || ne != 0 {
 		t.Error("zero retention must keep everything")
+	}
+}
+
+func TestEnsureDatabase(t *testing.T) {
+	ctx := context.Background()
+	cfg, err := pgx.ParseConfig(testDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := fmt.Sprintf("opticore_ensure_%d", time.Now().UnixNano())
+	dsn := strings.Replace(testDSN, "/"+cfg.Database, "/"+name, 1)
+	t.Cleanup(func() {
+		admin, err := pgx.Connect(ctx, testDSN)
+		if err == nil {
+			admin.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{name}.Sanitize())
+			admin.Close(ctx)
+		}
+	})
+
+	created, err := EnsureDatabase(ctx, dsn)
+	if err != nil || !created {
+		t.Fatalf("first EnsureDatabase = %v, %v; want created", created, err)
+	}
+	created, err = EnsureDatabase(ctx, dsn)
+	if err != nil || created {
+		t.Fatalf("second EnsureDatabase = %v, %v; want existing", created, err)
+	}
+
+	bad := strings.Replace(dsn, "://"+cfg.User+":", "://no_such_role_x:", 1)
+	if _, err := EnsureDatabase(ctx, bad); err == nil {
+		t.Fatal("a refused login must be an error, not a create")
+	}
+}
+
+// TestUnsealMigrationClearsSealedCRPassword runs migration 00006 on a row as
+// v0.1.0 wrote it: devices.cr_password sealed with no enc: prefix.
+func TestUnsealMigrationClearsSealedCRPassword(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	if _, err := s.pool.Exec(ctx, `INSERT INTO devices (id, serial, oui, product_class, first_inform, last_inform, cr_username, cr_password, cr_set_at)
+		VALUES ('OUI-PC-SEALED', 'SEALED', 'OUI', 'PC', now(), now(), 'u', 'pNmQ0uX2l+Yx8wq0n3fE7Ck9bR1sM5aVz4tY6hL2jD8=', now())`); err != nil {
+		t.Fatal(err)
+	}
+	sql, err := migrations.FS.ReadFile("00006_unseal_secrets.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := strings.SplitN(strings.SplitN(string(sql), "-- +goose Down", 2)[0], "-- +goose Up", 2)[1]
+	if _, err := s.pool.Exec(ctx, up); err != nil {
+		t.Fatalf("00006 up: %v", err)
+	}
+	var pass string
+	var setAt *time.Time
+	if err := s.pool.QueryRow(ctx, `SELECT cr_password, cr_set_at FROM devices WHERE id = 'OUI-PC-SEALED'`).Scan(&pass, &setAt); err != nil {
+		t.Fatal(err)
+	}
+	if pass != "" || setAt != nil {
+		t.Fatalf("sealed cr_password survived 00006: %q set_at=%v", pass, setAt)
 	}
 }

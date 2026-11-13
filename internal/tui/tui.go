@@ -1,4 +1,4 @@
-// Package tui is the Opticore operator console: four keyboard-only screens
+// Package tui is the Opticore operator console: three keyboard-only screens
 // over the local database. It speaks no CWMP and holds no SQL of its own.
 // Every read goes through the interfaces in Deps, and the one write (a wake)
 // goes through the caller's Wake func, so the daemon's validation and
@@ -29,9 +29,9 @@ type Deps struct {
 	// also wakes the device when the task is due now. The console never writes
 	// a task row itself.
 	Enqueue func(ctx context.Context, idOrSerial string, tasks []store.NewTask) ([]store.Task, error)
-	// Logs returns the newest n daemon log lines, oldest first as written.
-	// The console parses them; it never reads a log file itself.
-	Logs func(ctx context.Context, n int) ([]string, error)
+	// Serving reports whether an `opticore serve` holds the database's daemon
+	// lock, i.e. the CWMP listener is up. nil means unknown and shows nothing.
+	Serving func(ctx context.Context) (bool, error)
 }
 
 // DeviceReader lists devices newest-inform first and reads one by id or

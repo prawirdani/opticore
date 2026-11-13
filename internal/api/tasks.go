@@ -14,8 +14,6 @@ import (
 	"github.com/prawirdani/opticore/internal/store"
 )
 
-const encPrefix = "enc:"
-
 var taskNames = map[string]bool{
 	"get": true, "set": true, "add_object": true, "delete_object": true,
 	"reboot": true, "reset": true, "ping": true,
@@ -64,48 +62,46 @@ func (s *Server) taskView(t store.Task, reveal bool) taskJSON {
 	}
 }
 
-// scrub masks sealed ("enc:") values and, with reveal, decrypts them.
+// scrub masks secret task values by path. A set task's args carry values as
+// [[path, value, type], ...]; prev is a {path: [value, type]} map. reveal
+// returns the stored value unchanged.
 func (s *Server) scrub(raw json.RawMessage, reveal bool) json.RawMessage {
-	if len(raw) == 0 {
-		return nil
+	if len(raw) == 0 || reveal {
+		return raw
 	}
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return raw
 	}
-	v = s.walk(v, reveal)
-	out, err := json.Marshal(v)
+	m, ok := v.(map[string]any)
+	if !ok {
+		return raw
+	}
+	if vals, ok := m["values"].([]any); ok {
+		for _, item := range vals {
+			tuple, ok := item.([]any)
+			if !ok || len(tuple) < 2 {
+				continue
+			}
+			if path, ok := tuple[0].(string); ok && store.IsSecretPath(path) {
+				tuple[1] = "••••"
+			}
+		}
+	} else {
+		for path, item := range m {
+			if !store.IsSecretPath(path) {
+				continue
+			}
+			if tuple, ok := item.([]any); ok && len(tuple) > 0 {
+				tuple[0] = "••••"
+			}
+		}
+	}
+	out, err := json.Marshal(m)
 	if err != nil {
 		return raw
 	}
 	return out
-}
-
-func (s *Server) walk(v any, reveal bool) any {
-	switch x := v.(type) {
-	case map[string]any:
-		for k := range x {
-			x[k] = s.walk(x[k], reveal)
-		}
-		return x
-	case []any:
-		for i := range x {
-			x[i] = s.walk(x[i], reveal)
-		}
-		return x
-	case string:
-		if !strings.HasPrefix(x, encPrefix) {
-			return x
-		}
-		if reveal {
-			if plain, err := store.OpenSecret(s.key, strings.TrimPrefix(x, encPrefix)); err == nil {
-				return string(plain)
-			}
-		}
-		return "••••"
-	default:
-		return v
-	}
 }
 
 type taskInput struct {

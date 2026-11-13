@@ -20,27 +20,6 @@ var (
 	stBad    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 )
 
-// Log levels carry their word (INFO, WARN, ERROR) as the signal; colour only
-// reinforces it.
-var (
-	stLevelInfo  = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	stLevelDebug = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	stLevelWarn  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
-	stLevelBad   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("203"))
-)
-
-func levelStyle(level string) lipgloss.Style {
-	switch level {
-	case "ERROR", "FATAL", "CRITICAL":
-		return stLevelBad
-	case "WARN", "WARNING":
-		return stLevelWarn
-	case "DEBUG":
-		return stLevelDebug
-	}
-	return stLevelInfo
-}
-
 // defaultInformInterval is the fallback used when a device never reported
 // one, the same default as the API.
 const defaultInformInterval = 300

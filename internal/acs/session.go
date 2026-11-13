@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
+	"log"
 	"net/netip"
 	"net/url"
 	"slices"
@@ -25,8 +25,7 @@ import (
 type Sessions struct {
 	Store       *store.Store
 	Svc         *Service // used to create hook tasks through the same validator
-	Key         []byte
-	Logger      *slog.Logger
+	Logger      *log.Logger
 	GPVBatch    int // exact names per GetParameterValues
 	MaxAttempts int
 	// CRMatchSource refuses a ConnectionRequestURL whose host is not the
@@ -138,8 +137,8 @@ func (h *Sessions) Inform(ctx context.Context, s *cwmp.Session, in *cwmp.Inform)
 	}
 	crTrusted := true
 	if rec.CRURL != "" && h.CRMatchSource && !crHostIs(rec.CRURL, s.RemoteAddr) {
-		h.Logger.Warn("inform: ConnectionRequestURL host is not the source address; ignoring it",
-			"device_id", s.DeviceID, "cr_url", rec.CRURL, "remote", s.RemoteAddr)
+		h.Logger.Printf("WARN inform: ConnectionRequestURL host is not the source address; ignoring it device=%s cr_url=%q remote=%s",
+			s.DeviceID, rec.CRURL, s.RemoteAddr)
 		for name := range rec.Params {
 			if strings.HasSuffix(name, ".ManagementServer.ConnectionRequestURL") {
 				delete(rec.Params, name)
@@ -195,13 +194,14 @@ func (h *Sessions) Inform(ctx context.Context, s *cwmp.Session, in *cwmp.Inform)
 		}
 	}
 	s.Data = st
-	h.Logger.Info("inform", "device_id", s.DeviceID, "events", rec.Events,
-		"retry", in.RetryCount, "pending_tasks", len(tasks), "version", s.Version)
+	h.Logger.Printf("inform device=%s events=%v retry=%d pending_tasks=%d version=%s",
+		s.DeviceID, rec.Events, in.RetryCount, len(tasks), s.Version)
 	return nil
 }
 
 func (h *Sessions) TransferComplete(ctx context.Context, s *cwmp.Session, tc *cwmp.TransferComplete) error {
-	h.Logger.Info("transfer complete", "device_id", s.DeviceID, "command_key", tc.CommandKey, "fault_code", tc.FaultCode)
+	h.Logger.Printf("transfer complete device=%s command_key=%q fault_code=%d",
+		s.DeviceID, tc.CommandKey, tc.FaultCode)
 	return nil
 }
 
@@ -348,7 +348,7 @@ func (h *Sessions) hookNext(ctx context.Context, s *cwmp.Session, st *state) (cw
 	if err != nil {
 		// The hook failed: the session continues and SSE still publishes the
 		// Inform, so an external client can react (§7).
-		h.Logger.Warn("hook failed; continuing without it", "device_id", s.DeviceID, "step", hk.step, "err", err)
+		h.Logger.Printf("WARN hook failed; continuing without it device=%s step=%d err=%v", s.DeviceID, hk.step, err)
 		h.endHook(s, hk, "hook call failed")
 		return cwmp.Request{}, false, nil
 	}
@@ -368,7 +368,7 @@ func (h *Sessions) hookNext(ctx context.Context, s *cwmp.Session, st *state) (cw
 	}
 	created, err := h.Svc.CreateTasks(ctx, s.DeviceID, tasks)
 	if err != nil {
-		h.Logger.Warn("hook tasks rejected", "device_id", s.DeviceID, "step", hk.step, "err", err)
+		h.Logger.Printf("WARN hook tasks rejected device=%s step=%d err=%v", s.DeviceID, hk.step, err)
 		h.endHook(s, hk, "invalid hook tasks")
 		return cwmp.Request{}, false, nil
 	}
@@ -387,7 +387,7 @@ func (h *Sessions) endHook(s *cwmp.Session, hk *hookState, why string) {
 	}
 	hk.done = true
 	hk.running = false
-	h.Logger.Info("hook ended", "device_id", s.DeviceID, "steps", hk.step, "why", why)
+	h.Logger.Printf("hook ended device=%s steps=%d why=%q", s.DeviceID, hk.step, why)
 }
 
 // plan turns a task into its RPC steps.
@@ -430,13 +430,6 @@ func (h *Sessions) plan(st *state, t *store.Task) ([]cwmp.Request, error) {
 				return nil, err
 			}
 			val := v[1]
-			if strings.HasPrefix(val, encPrefix) {
-				b, err := store.OpenSecret(h.Key, strings.TrimPrefix(val, encPrefix))
-				if err != nil {
-					return nil, fmt.Errorf("decrypt value %d: %w", i+1, err)
-				}
-				val = string(b)
-			}
 			vals[i] = cwmp.ParamValue{Name: p[0], Value: val, Type: v[2]}
 			names[i] = p[0]
 		}
@@ -507,16 +500,12 @@ func (h *Sessions) Response(ctx context.Context, s *cwmp.Session, req cwmp.Reque
 
 	if tg.kind == "cr" {
 		if m.Kind == cwmp.KindFault {
-			h.Logger.Warn("set connection-request credentials failed", "device_id", s.DeviceID,
-				"fault_code", m.Fault.FaultCode, "fault", m.Fault.FaultString)
+			h.Logger.Printf("WARN set connection-request credentials failed device=%s fault_code=%d fault=%q",
+				s.DeviceID, m.Fault.FaultCode, m.Fault.FaultString)
 			return h.Store.SetLastFault(ctx, s.DeviceID, faultJSON(m.Fault.FaultCode, m.Fault.FaultString, 0))
 		}
-		enc, err := store.SealSecret(h.Key, []byte(st.crPass))
-		if err != nil {
-			return err
-		}
-		h.Logger.Info("connection-request credentials set", "device_id", s.DeviceID)
-		return h.Store.SetCRCredentials(ctx, s.DeviceID, st.crUser, enc)
+		h.Logger.Printf("connection-request credentials set device=%s", s.DeviceID)
+		return h.Store.SetCRCredentials(ctx, s.DeviceID, st.crUser, st.crPass)
 	}
 
 	if tg.kind == "hook" {
@@ -544,15 +533,7 @@ func (h *Sessions) Response(ctx context.Context, s *cwmp.Session, req cwmp.Reque
 	case "prev":
 		st.prev = map[string][2]string{}
 		for _, p := range m.GetParameterValuesResponse.Params {
-			v := p.Value
-			if store.IsSecretPath(p.Name) && v != "" {
-				sealed, err := store.SealSecret(h.Key, []byte(v))
-				if err != nil {
-					return err
-				}
-				v = encPrefix + sealed
-			}
-			st.prev[p.Name] = [2]string{v, p.Type}
+			st.prev[p.Name] = [2]string{p.Value, p.Type}
 		}
 		b, _ := json.Marshal(st.prev)
 		return h.Store.SetTaskPrev(ctx, t.ID, b)
@@ -605,7 +586,7 @@ func (h *Sessions) Response(ctx context.Context, s *cwmp.Session, req cwmp.Reque
 		st.cur = nil
 		st.ping = t
 		st.pingReady = false
-		h.Logger.Info("ping requested", "device_id", s.DeviceID, "task", t.ID)
+		h.Logger.Printf("ping requested device=%s task=%d", s.DeviceID, t.ID)
 		return nil
 	case "pingget":
 		st.cur = nil
@@ -617,7 +598,7 @@ func (h *Sessions) Response(ctx context.Context, s *cwmp.Session, req cwmp.Reque
 		state, res := pingResult(obj, m.GetParameterValuesResponse.Params)
 		b, _ := json.Marshal(res)
 		if state == "Complete" {
-			h.Logger.Info("ping done", "device_id", s.DeviceID, "task", t.ID)
+			h.Logger.Printf("ping done device=%s task=%d", s.DeviceID, t.ID)
 			return h.Store.FinishTask(ctx, t.ID, "done", b, nil, "")
 		}
 		if state == "" {
@@ -649,7 +630,7 @@ func (h *Sessions) done(ctx context.Context, s *cwmp.Session, t *store.Task, res
 			Name: t.Name, Status: "done", Result: b,
 		})
 	}
-	h.Logger.Info("task done", "device_id", s.DeviceID, "task", t.ID, "name", t.Name)
+	h.Logger.Printf("task done device=%s task=%d name=%s", s.DeviceID, t.ID, t.Name)
 	return h.Store.FinishTask(ctx, t.ID, "done", b, nil, "")
 }
 
@@ -657,7 +638,8 @@ func (h *Sessions) done(ctx context.Context, s *cwmp.Session, t *store.Task, res
 func (h *Sessions) fault(ctx context.Context, s *cwmp.Session, t *store.Task, f cwmp.Fault) error {
 	retryable := f.FaultCode == 9002 || f.FaultCode == 9004
 	if retryable && t.Attempts < h.maxAttempts() && idempotent(t.Name) {
-		h.Logger.Warn("task fault, will retry", "device_id", s.DeviceID, "task", t.ID, "fault_code", f.FaultCode)
+		h.Logger.Printf("WARN task fault, will retry device=%s task=%d fault_code=%d",
+			s.DeviceID, t.ID, f.FaultCode)
 		h.st(s).stop = true // retry on the next wake, not in this session
 		return h.Store.RequeueTask(ctx, t.ID)
 	}
@@ -678,7 +660,8 @@ func (h *Sessions) fail(ctx context.Context, s *cwmp.Session, t *store.Task, cod
 			Name: t.Name, Status: "failed", FaultCode: fc, Fault: msg,
 		})
 	}
-	h.Logger.Warn("task failed", "device_id", s.DeviceID, "task", t.ID, "name", t.Name, "fault_code", code, "fault", msg)
+	h.Logger.Printf("WARN task failed device=%s task=%d name=%s fault_code=%d fault=%q",
+		s.DeviceID, t.ID, t.Name, code, msg)
 	var fc *int
 	if code != 0 {
 		fc = &code
@@ -731,14 +714,15 @@ func (h *Sessions) Close(s *cwmp.Session, inflight *cwmp.Request) {
 		// Nothing irreversible was sent (or it is safe to resend): run again later.
 		err = h.Store.RequeueTask(ctx, t.ID)
 	} else {
-		h.Logger.Warn("session lost mid-RPC; task outcome unknown", "device_id", s.DeviceID, "task", t.ID, "name", t.Name)
+		h.Logger.Printf("WARN session lost mid-RPC; task outcome unknown device=%s task=%d name=%s",
+			s.DeviceID, t.ID, t.Name)
 		err = h.Store.FinishTask(ctx, t.ID, "unknown", nil, nil, "session ended before the device answered")
 		if err == nil && t.BatchID != nil {
 			err = h.Store.CancelBatchRest(ctx, *t.BatchID, t.BatchSeq)
 		}
 	}
 	if err != nil {
-		h.Logger.Error("close session", "device_id", s.DeviceID, "task", t.ID, "err", err)
+		h.Logger.Printf("ERROR close session device=%s task=%d err=%v", s.DeviceID, t.ID, err)
 	}
 }
 
