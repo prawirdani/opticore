@@ -60,6 +60,7 @@ type actionKind int
 
 const (
 	actWake actionKind = iota
+	actFetch
 	actReboot
 	actReset
 )
@@ -229,7 +230,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status, m.statusBad = "ERR: queue "+msg.verb+" for "+msg.label+": "+msg.err.Error(), true
 			return m, nil
 		}
-		m.status, m.statusBad = queuedStatus(msg.verb, msg.tasks), false
+		m.status, m.statusBad = queuedStatus(msg.verb, msg.tasks, msg.tail), false
 		if msg.device != m.det.device.ID {
 			return m, nil
 		}
@@ -308,6 +309,9 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "b":
 		m.beginAction(actReboot)
+		return m, nil
+	case "f":
+		m.beginAction(actFetch)
 		return m, nil
 	case "x":
 		m.beginAction(actReset)
@@ -629,6 +633,13 @@ func (m *model) beginAction(kind actionKind) {
 		}
 		c.prompt = "Wake " + label + "?"
 		c.detail = "Sends a connection request now; the device starts a session if it is reachable."
+	case actFetch:
+		if m.deps.Enqueue == nil {
+			m.say("queueing tasks is not configured")
+			return
+		}
+		c.prompt = "Fetch parameters " + label + "?"
+		c.detail = "Reads every parameter in the tree (1645 on the F670L, 2732 on the HG8145V5); the session runs a few seconds and replaces the cached values when it lands."
 	case actReboot:
 		if m.deps.Enqueue == nil {
 			m.say("queueing tasks is not configured")
@@ -655,31 +666,39 @@ func (m *model) queue(c *confirmState) tea.Cmd {
 		m.say("queueing tasks is not configured")
 		return nil
 	}
+	// An empty args list is the whole-tree get; Enqueue validates it and sends
+	// the connection request.
 	name, verb := "reboot", "reboot"
-	if c.kind == actReset {
+	tail := "device woken"
+	switch c.kind {
+	case actFetch:
+		name, verb = "get", "fetch parameters"
+		tail = "values appear after the device's next session"
+	case actReset:
 		name, verb = "reset", "factory reset"
 	}
 	ctx, id, label := m.ctx, c.id, c.label
 	return func() tea.Msg {
 		tasks, err := enqueue(ctx, id, []store.NewTask{{Name: name}})
-		return enqueueMsg{device: id, label: label, verb: verb, tasks: tasks, err: err}
+		return enqueueMsg{device: id, label: label, verb: verb, tail: tail, tasks: tasks, err: err}
 	}
 }
 
 // queuedStatus echoes the task ids the service returned.
-func queuedStatus(verb string, tasks []store.Task) string {
+func queuedStatus(verb string, tasks []store.Task, tail string) string {
 	ids := make([]string, 0, len(tasks))
 	for _, t := range tasks {
 		ids = append(ids, "#"+strconv.FormatInt(t.ID, 10))
 	}
 	if len(ids) == 0 {
-		return "queued " + verb + " — device woken"
+		return "queued " + verb + " — " + tail
 	}
-	return "queued " + verb + " " + strings.Join(ids, ", ") + " — device woken"
+	return "queued " + verb + " " + strings.Join(ids, ", ") + " — " + tail
 }
 
-// back implements Esc: collapse a level, then leave the drill-in screen, then
-// clear the filter, then return to the devices tab.
+// back implements Esc and backspace. On the device screen an applied filter is
+// cleared first; then Tasks and Events leave for the device list, while
+// Parameters collapses one level before leaving.
 func (m *model) back() tea.Cmd {
 	switch m.screen {
 	case scrDevice:
@@ -689,13 +708,9 @@ func (m *model) back() tea.Cmd {
 			m.refilterRows()
 			return nil
 		}
-		if m.det.section != sectionParams {
-			return nil
+		if m.det.section != sectionParams || !m.det.collapse() {
+			m.screen = scrDevices
 		}
-		if m.det.collapse() {
-			return nil
-		}
-		m.screen = scrDevices
 		return nil
 	case scrJob:
 		m.screen = scrJobs
@@ -762,6 +777,7 @@ type enqueueMsg struct {
 	device string
 	label  string
 	verb   string
+	tail   string
 	tasks  []store.Task
 	err    error
 }

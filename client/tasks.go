@@ -133,6 +133,13 @@ func (c *Client) Wake(ctx context.Context, deviceID string) error {
 	return c.do(ctx, http.MethodPost, []string{"devices", deviceID, "wake"}, nil, nil, nil, nil)
 }
 
+// Summon is GenieACS's Summon in one call: it queues a whole-tree get, which
+// also sends the connection request, so the device reports every parameter in
+// the session that follows. It returns the queued task.
+func (c *Client) Summon(ctx context.Context, deviceID string) ([]Task, error) {
+	return c.CreateTasks(ctx, deviceID, []Task{Get()}, "")
+}
+
 // RevertTask queues a revert set built from a done set task's recorded prev.
 func (c *Client) RevertTask(ctx context.Context, deviceID string, taskID int64, idemKey string) ([]Task, error) {
 	var out struct {

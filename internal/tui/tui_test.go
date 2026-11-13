@@ -34,6 +34,7 @@ type fake struct {
 	woken    []string
 
 	queued     []store.Task
+	lastNew    []store.NewTask
 	enqueueErr error
 	nextID     int64
 
@@ -156,6 +157,7 @@ func (f *fake) enqueue(ctx context.Context, idOrSerial string, tasks []store.New
 	if f.enqueueErr != nil {
 		return nil, f.enqueueErr
 	}
+	f.lastNew = append([]store.NewTask(nil), tasks...)
 	out := make([]store.Task, 0, len(tasks))
 	for _, t := range tasks {
 		f.nextID++
@@ -1631,34 +1633,108 @@ func TestDetailSlashFiltersActiveSection(t *testing.T) {
 	}
 }
 
-func TestDetailEscClearsFilterThenActs(t *testing.T) {
-	_, m := detailFixture(t, 2, 2)
-	root := "InternetGatewayDevice."
-	if !m.det.expanded[root] {
-		t.Fatal("fixture root did not auto-expand")
+func TestDetailEscLeavesFromAnySection(t *testing.T) {
+	sections := []struct {
+		name  string
+		tabs  int
+		key   tea.KeyMsg
+		label string
+	}{
+		{"tasks esc", 1, keyEsc, "esc"},
+		{"tasks backspace", 1, keyBack, "backspace"},
+		{"events esc", 2, keyEsc, "esc"},
+		{"events backspace", 2, keyBack, "backspace"},
 	}
+	for _, tc := range sections {
+		t.Run(tc.name, func(t *testing.T) {
+			_, m := detailFixture(t, 2, 2)
+			for i := 0; i < tc.tabs; i++ {
+				m = press(t, m, keyTab)
+			}
+			if m.det.section == sectionParams {
+				t.Fatal("fixture did not switch section")
+			}
+			m = press(t, m, tc.key)
+			if m.screen != scrDevices {
+				t.Fatalf("%s did not leave the device screen: %v", tc.label, m.screen)
+			}
+		})
+	}
+}
 
-	m = press(t, m, keyTab) // tasks
+func TestDetailEscClearsFilterBeforeLeaving(t *testing.T) {
+	sections := []struct {
+		name string
+		tabs int
+		key  tea.KeyMsg
+	}{
+		{"tasks esc", 1, keyEsc},
+		{"tasks backspace", 1, keyBack},
+		{"events esc", 2, keyEsc},
+		{"events backspace", 2, keyBack},
+	}
+	for _, tc := range sections {
+		t.Run(tc.name, func(t *testing.T) {
+			_, m := detailFixture(t, 4, 3)
+			for i := 0; i < tc.tabs; i++ {
+				m = press(t, m, keyTab)
+			}
+			m = press(t, m, typed("/"))
+			m = press(t, m, typed("zzz"))
+			m = press(t, m, keyEnter)
+
+			m = press(t, m, tc.key)
+			if m.screen != scrDevice {
+				t.Fatalf("first %v left the screen: %v", tc.key, m.screen)
+			}
+			if f := m.activeFilter(); f == nil || f.text != "" {
+				t.Fatalf("first %v did not clear the filter", tc.key)
+			}
+			m = press(t, m, tc.key)
+			if m.screen != scrDevices {
+				t.Fatalf("second %v stayed on the device screen", tc.key)
+			}
+		})
+	}
+}
+
+func TestDetailParamsCollapseBeforeLeaving(t *testing.T) {
+	_, m := detailFixture(t, 2, 2)
+	if !m.det.expanded["InternetGatewayDevice."] {
+		t.Fatal("fixture root is not expanded")
+	}
 	m = press(t, m, typed("/"))
 	m = press(t, m, typed("zzz"))
 	m = press(t, m, keyEnter)
-	m = press(t, m, keyEsc)
-	if m.det.taskFilter.text != "" || m.det.section != sectionTasks || m.screen != scrDevice {
-		t.Fatalf("esc did not clear the task filter: %q section=%v", m.det.taskFilter.text, m.det.section)
-	}
-	m = press(t, m, keyEsc)
-	if m.screen != scrDevice {
-		t.Fatalf("esc on Tasks left the detail: %v", m.screen)
-	}
 
-	m = press(t, m, keyShiftTab) // parameters
-	m = press(t, m, keyEsc)      // collapse the root
-	if m.det.expanded[root] {
-		t.Fatal("esc did not collapse the root")
+	m = press(t, m, keyEsc) // clear the filter only
+	if m.screen != scrDevice || m.det.filter.text != "" {
+		t.Fatalf("esc did not clear the filter first: screen=%v filter=%q", m.screen, m.det.filter.text)
 	}
-	m = press(t, m, keyEsc) // leave
+	if !m.det.expanded["InternetGatewayDevice."] {
+		t.Fatal("clearing the filter collapsed a level")
+	}
+	m = press(t, m, keyEsc) // collapse one level
+	if m.screen != scrDevice || m.det.expanded["InternetGatewayDevice."] {
+		t.Fatalf("esc did not collapse a level: screen=%v expanded=%v", m.screen, m.det.expanded)
+	}
+	m = press(t, m, keyBack) // nothing left: leave
 	if m.screen != scrDevices {
-		t.Fatalf("esc did not leave the detail: %v", m.screen)
+		t.Fatalf("backspace did not leave after the tree was collapsed: %v", m.screen)
+	}
+}
+
+func TestDetailConfirmEscCancelsInsteadOfLeaving(t *testing.T) {
+	_, m := detailFixture(t, 2, 2)
+	m = press(t, m, keyTab) // tasks
+	m = press(t, m, typed("b"))
+	if m.confirm == nil {
+		t.Fatal("no confirmation open")
+	}
+	m = press(t, m, keyEsc)
+	if m.confirm != nil || m.screen != scrDevice || m.det.section != sectionTasks {
+		t.Fatalf("esc did not cancel: confirm=%v screen=%v section=%v",
+			m.confirm, m.screen, m.det.section)
 	}
 }
 
@@ -1752,5 +1828,103 @@ func TestDetailHelpLineIsTrimmed(t *testing.T) {
 		if !strings.Contains(help, want) {
 			t.Fatalf("help line lacks %q: %q", want, help)
 		}
+	}
+}
+
+func TestDetailFetchParameters(t *testing.T) {
+	f, m := detailFixture(t, 2, 2)
+	m = press(t, m, typed("f"))
+	if m.confirm == nil {
+		t.Fatal("f did not ask for confirmation")
+	}
+	if m.confirm.prompt != "Fetch parameters ONT0001 — HG8145V5?" {
+		t.Fatalf("prompt: %q", m.confirm.prompt)
+	}
+	for _, want := range []string{"1645", "2732", "every parameter", "cached values"} {
+		if !strings.Contains(m.confirm.detail, want) {
+			t.Fatalf("confirm does not explain %q: %q", want, m.confirm.detail)
+		}
+	}
+	if !strings.Contains(stripANSI(m.View()), "f  fetch parameters") {
+		t.Fatalf("fetch row missing from ACTIONS:\n%s", m.View())
+	}
+
+	m = press(t, m, typed("n"))
+	if len(f.queued) != 0 || len(f.lastNew) != 0 {
+		t.Fatalf("n queued something: %+v", f.queued)
+	}
+
+	m = press(t, m, typed("f"))
+	m = press(t, m, typed("y"))
+	if len(f.lastNew) != 1 {
+		t.Fatalf("enqueued %d tasks, want 1", len(f.lastNew))
+	}
+	if f.lastNew[0].Name != "get" || len(f.lastNew[0].Args) != 0 {
+		t.Fatalf("task: name=%q args=%q, want the whole-tree get", f.lastNew[0].Name, f.lastNew[0].Args)
+	}
+	if m.status != "queued fetch parameters #31 — values appear after the device's next session" {
+		t.Fatalf("status: %q", m.status)
+	}
+	if !strings.Contains(stripANSI(m.View()), "#31") {
+		t.Fatalf("task id missing from the screen:\n%s", m.View())
+	}
+}
+
+func TestDetailFetchWarnsWhenDaemonDown(t *testing.T) {
+	dev := device(1)
+	f := &fake{devices: []store.Device{dev}, serveDown: true}
+	m := newTestModel(f)
+	m.w, m.h = 120, 30
+	m = settle(t, m, m.Init()())
+	m = press(t, m, keyEnter)
+	m = press(t, m, typed("f"))
+	if m.confirm == nil {
+		t.Fatal("no confirmation")
+	}
+	if !strings.Contains(m.View(), serveWarning) {
+		t.Fatalf("fetch confirmation lacks the down warning:\n%s", m.View())
+	}
+}
+
+func TestFetchKeyIsDetailOnly(t *testing.T) {
+	f := &fake{devices: nDevices(1)}
+	m := boot(t, f)
+	m = press(t, m, typed("f"))
+	if m.confirm != nil || len(f.queued) != 0 || m.screen != scrDevices {
+		t.Fatalf("f acted on the list: confirm=%v queued=%+v screen=%v", m.confirm, f.queued, m.screen)
+	}
+}
+
+func TestDetailActionsLayoutGrowsByOneRow(t *testing.T) {
+	_, m := detailFixture(t, 2, 2)
+	facts := len(m.factRows())
+	if facts != 12 {
+		t.Fatalf("fact rows: %d", facts)
+	}
+
+	// 120 columns: the actions sit beside the facts, so one more action row
+	// costs nothing below the header.
+	m.w, m.h = 120, 40
+	wide := viewLines(m)
+	if got, want := lineIndex(wide, "Parameters"), lineIndex(wide, "id ")+facts+1; got != want {
+		t.Fatalf("section bar at %d, want %d after the fact block", got, want)
+	}
+	col := strings.Index(wide[lineIndex(wide, "ACTIONS")], "ACTIONS")
+	if want := 11 + 1 + maxFactValue + columnGap; col != want {
+		t.Fatalf("fact column reflowed: ACTIONS at %d, want %d", col, want)
+	}
+
+	// 80 columns: stacked, so each action is exactly one row.
+	m.w, m.h = 80, 40
+	narrow := viewLines(m)
+	last := lineIndex(narrow, "last fault")
+	bar := lineIndex(narrow, "Parameters")
+	// Blank, ACTIONS header and a blank before the bar cost three rows; each
+	// action costs one more.
+	if want := last + 3 + len(actionSpecs) + 1; bar != want {
+		t.Fatalf("section bar at %d, want %d (%d actions, one row each)", bar, want, len(actionSpecs))
+	}
+	if !strings.Contains(narrow[lineIndex(narrow, "fetch parameters")], "fetch parameters") {
+		t.Fatal("fetch row not rendered")
 	}
 }

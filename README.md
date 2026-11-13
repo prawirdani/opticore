@@ -398,7 +398,9 @@ case "failed": f := t.Fault()  // *client.Fault, nil unless a CWMP fault came ba
 }
 ```
 
-Other calls: `Wake`, `CancelTask`, `RevertTask(deviceID, taskID, idemKey)`.
+Other calls: `Wake`, `Summon`, `CancelTask`, `RevertTask(deviceID, taskID, idemKey)`.
+`Summon` is one call for the whole-tree refresh: it queues a root `get`, which
+also wakes the device.
 `RevertTask` queues a `set` that restores what a done `set` overwrote, using the
 `prev` the daemon recorded in that session.
 

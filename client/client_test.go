@@ -194,6 +194,43 @@ func TestClientRequests(t *testing.T) {
 	}
 }
 
+func TestSummon(t *testing.T) {
+	var body []Task
+	var idem string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/devices/d1/tasks" {
+			t.Errorf("%s %s, want POST /v1/devices/d1/tasks", r.Method, r.URL.Path)
+		}
+		idem = r.Header.Get("Idempotency-Key")
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("body: %v", err)
+		}
+		fmt.Fprint(w, `{"data":[{"id":9,"name":"get","status":"pending"}]}`)
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := c.Summon(context.Background(), "d1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != 9 {
+		t.Fatalf("Summon = %+v", tasks)
+	}
+	if len(body) != 1 || body[0].Name != "get" {
+		t.Fatalf("Summon body = %+v, want one get task", body)
+	}
+	if args := strings.TrimSpace(string(body[0].Args)); args != "{}" {
+		t.Fatalf("Summon args = %s, want {} (root get)", args)
+	}
+	if idem != "" {
+		t.Errorf("Idempotency-Key = %q, want none", idem)
+	}
+}
+
 func TestErrorDecoding(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

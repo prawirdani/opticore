@@ -582,6 +582,7 @@ type actionSpec struct{ key, name, what string }
 
 var actionSpecs = []actionSpec{
 	{"w", "wake", "send a connection request now"},
+	{"f", "fetch parameters", "queue a whole-tree get and wake the device"},
 	{"b", "reboot", "queue a reboot task"},
 	{"x", "factory reset", "queue a reset; wipes the device configuration"},
 }
