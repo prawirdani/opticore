@@ -1,9 +1,9 @@
 // Package client is the Go SDK for the Opticore /v1 HTTP API.
 //
 // It is a thin, standard-library-only transport over the same JSON the daemon
-// serves: typed task builders, typed read models, a CWMP fault helper, token
-// auth, an SSE Watch stream with automatic resume, and the provisioner-side
-// hook handler. It holds no provisioning or CWMP logic of its own.
+// serves: typed task builders, typed read models, a CWMP fault helper, an SSE
+// Watch stream with automatic resume, and the provisioner-side hook handler.
+// It holds no provisioning or CWMP logic of its own.
 package client
 
 import (
@@ -34,9 +34,8 @@ func (e *Error) Error() string {
 
 // Client calls one Opticore daemon. It is safe for concurrent use.
 type Client struct {
-	base  *url.URL
-	token string
-	hc    *http.Client
+	base *url.URL
+	hc   *http.Client
 }
 
 // Option tunes a Client.
@@ -49,9 +48,8 @@ func WithHTTPClient(hc *http.Client) Option {
 }
 
 // New builds a client for the daemon root, for example
-// http://127.0.0.1:8081. token is sent as a bearer token; an empty token is
-// allowed for a loopback server that runs without auth.
-func New(baseURL, token string, opts ...Option) (*Client, error) {
+// http://127.0.0.1:8081.
+func New(baseURL string, opts ...Option) (*Client, error) {
 	u, err := url.Parse(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
 	if err != nil {
 		return nil, fmt.Errorf("opticore: base URL: %w", err)
@@ -62,7 +60,7 @@ func New(baseURL, token string, opts ...Option) (*Client, error) {
 	if u.Host == "" {
 		return nil, fmt.Errorf("opticore: base URL %q has no host", baseURL)
 	}
-	c := &Client{base: u, token: strings.TrimSpace(token), hc: &http.Client{}}
+	c := &Client{base: u, hc: &http.Client{}}
 	for _, o := range opts {
 		o(c)
 	}
@@ -94,9 +92,6 @@ func (c *Client) request(ctx context.Context, method string, parts []string, q u
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

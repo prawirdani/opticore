@@ -59,15 +59,26 @@ func TestPidRoundTrip(t *testing.T) {
 	}
 }
 
-func TestStopFindsOnlyServeProcesses(t *testing.T) {
+func TestIsServeArgs(t *testing.T) {
+	cases := []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"/usr/local/bin/opticore", "serve"}, true},
+		{[]string{"./bin/opticore", "serve", "-d"}, true},
+		{[]string{"C:\\opticore.exe", "serve"}, true},
+		{[]string{"/usr/local/bin/opticore", "tui"}, false},
+		{[]string{"/usr/local/bin/opticore", "stop"}, false},
+		{[]string{"/usr/local/bin/opticore"}, false},
+		{[]string{"/tmp/go-build/opticore.test", "serve"}, false},
+		{nil, false},
+	}
+	for _, c := range cases {
+		if got := isServeArgs(c.args); got != c.want {
+			t.Errorf("isServeArgs(%q) = %v, want %v", c.args, got, c.want)
+		}
+	}
 	if isServe(os.Getpid()) {
 		t.Fatal("the test binary must not look like an opticore serve")
-	}
-	path := filepath.Join(t.TempDir(), "opticore.pid")
-	if err := writePID(path); err != nil {
-		t.Fatal(err)
-	}
-	if pids := servePIDs(path); len(pids) != 0 {
-		t.Fatalf("servePIDs = %v; the test binary is not a daemon", pids)
 	}
 }

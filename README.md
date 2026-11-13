@@ -131,11 +131,10 @@ accepts before or after the command name. With the container, pass the same
 variables with `-e` instead: real environment variables always win over the
 file, and `migrate` is unnecessary because `serve` applies migrations.
 
-Then create an API token and point a device at the ACS:
+Then point a device at the ACS, and check the API answers:
 
 ```sh
-opticore token create ops --scope read,write    # printed once
-curl -H 'Authorization: Bearer <token>' localhost:8081/v1/devices
+curl localhost:8081/v1/devices
 ```
 
 Give the ONTs `http://<this host>:7547/` as their ACS URL. The first Inform
@@ -183,10 +182,7 @@ unit, a container, or a one-off `FOO=1 opticore serve` behaves as written.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `OPTICORE_API_ADDR` | `:8081` | API listener |
-| `OPTICORE_API_AUTH` | `true` | require a bearer token on `/v1`; `false` disables API auth entirely |
-| `OPTICORE_API_INSECURE_LOCAL` | `false` | accept unauthenticated `/v1` from loopback only |
-| `OPTICORE_API_REQUIRE_REVEAL` | `true` | `?reveal=1` needs a token with the `reveal` scope |
+| `OPTICORE_API_ADDR` | `:8081` | API listener. There is no authentication: bind it to an address only your provisioning system can reach |
 
 ### Inform hook
 
@@ -267,8 +263,7 @@ expires with the task.
 A leaf whose last segment ends in `password`, `passphrase`, `secret`, `psk` or
 `key` (case-insensitive, `ParameterKey` excepted) is a secret: it is sealed
 with `OPTICORE_SECRET_KEY` before it reaches the database, and is returned as
-`••••` unless the request carries `?reveal=1` from a token with the `reveal`
-scope.
+`••••` unless the request carries `?reveal=1`.
 
 Task statuses: `pending`, `running`, `done`, `failed`, `unknown`, `cancelled`,
 `expired`.
@@ -333,17 +328,15 @@ It needs Go 1.26 or newer and pulls in no other module.
 ### Connect
 
 ```go
-c, err := client.New("http://acs.internal:8081", token)
+c, err := client.New("http://acs.internal:8081")
 if err != nil {
 	return err
 }
 ```
 
-`token` is an API token (`opticore token create provisioner --scope read,write`
-or `--scope read,write,reveal` if the code must read secrets). An empty token
-works only against a daemon started with `OPTICORE_API_AUTH=false` on loopback.
-The default `http.Client` has no timeout so a `Watch` can stay open; give every
-ordinary call a context deadline.
+There is no credential to pass: the daemon trusts whoever reaches its API
+address. The default `http.Client` has no timeout so a `Watch` can stay open;
+give every ordinary call a context deadline.
 
 `client.WithHTTPClient(hc)` replaces the HTTP client, for a private CA or a
 proxy.
@@ -359,8 +352,7 @@ events, err := c.ListEvents(ctx, dev.ID, client.ListEventsOptions{Limit: 20})
 ```
 
 A device id is `OUI-ProductClass-Serial`; a bare serial is accepted everywhere.
-`Param.Value` for a secret leaf is `••••` unless the call asks for `reveal` and
-the token carries that scope.
+`Param.Value` for a secret leaf is `••••` unless the call passes `reveal=true`.
 
 ### Write
 
@@ -477,7 +469,12 @@ A task that ended with a CWMP fault has `Task.Fault() *client.Fault` carrying
 
 ## HTTP API
 
-Bearer tokens, hashed at rest, with scopes `read`, `write` and `reveal`.
+There is no authentication on `/v1`: whatever can reach `OPTICORE_API_ADDR`
+can read devices, queue tasks, reveal secrets and factory-reset hardware. Treat
+the listener address as the access control — bind it to the interface your
+provisioning system uses, and keep it off any network with devices or end users
+on it. The CWMP listener and the API are separate addresses for this reason.
+
 `Idempotency-Key` on task creation is kept permanently and unique per device:
 a retry returns the original rows instead of enqueueing again.
 
@@ -557,7 +554,6 @@ opticore task <serial|id> ping <host>
 opticore task <serial|id> revert <taskId>
 opticore jobs | job <id> | job cancel <id> | job revert <id>
 opticore wake <serial|id>
-opticore token create <name> --scope read,write[,reveal]
 opticore version
 opticore tui                                   operator console (also the no-arg default)
 opticore logs [-n N] [-f]                      tail the daemon log file
@@ -612,14 +608,14 @@ the device.
 - **`CWMP_AUTH_USERNAME` / `CWMP_AUTH_PASSWORD`** make devices authenticate with
   HTTP Digest (MD5, `qop=auth`, stateless signed nonces) or Basic. Set the same
   pair in the ONTs' `ManagementServer.Username` / `Password`.
-- **`OPTICORE_API_AUTH=false`** turns API auth off for every client, not just
-  loopback: anyone who can reach the API listener can read devices, queue
-  tasks and reveal secrets. The daemon logs a warning at startup. Use it only
-  behind a network boundary or on a throwaway instance; prefer
-  `OPTICORE_API_INSECURE_LOCAL=true` when only this host needs access.
-- **Secrets** are AES-256-GCM encrypted at rest and masked unless revealed with
-  the `reveal` scope. `OPTICORE_SECRET_KEY` is the one thing you must back up
-  alongside the database.
+- **`/v1` has no authentication.** The API listener can read devices, queue
+  tasks, reveal secrets and factory-reset hardware, so `OPTICORE_API_ADDR` is
+  the access control: bind it to the interface your provisioning system uses,
+  never to a network with devices or end users on it, and prefer a private
+  address over `:8081`. Anyone who reaches it is you.
+- **Secrets** are AES-256-GCM encrypted at rest and masked unless the request
+  asks for `?reveal=1`. `OPTICORE_SECRET_KEY` is the one thing you must back up
+  alongside the database; without it stored secrets cannot be read back.
 - A refused wake clears the stored credentials, so the next Inform sets them
   again instead of leaving the device unreachable.
 
@@ -670,7 +666,6 @@ Planned, not built yet:
 
 - Firmware: upload, a device-facing file server, the `download` task and
   `TransferComplete`.
-- `token list` and `token revoke`.
 - Creating a job from the CLI.
 - Revealing a secret from the console, and creating jobs from it.
 
@@ -686,7 +681,7 @@ internal/cwmp/    HTTP transport, sessions, XML scanner, SOAP decode/write, auth
 internal/acs/     session engine, task service, jobs, wake self-heal
 client/           public Go SDK: API client, task builders, SSE watch, hook handler
 internal/hook/    the daemon's side of the hook; wire types alias client/
-internal/api/     /v1 handlers, SSE, tokens
+internal/api/     /v1 handlers, SSE
 internal/store/   pgx store, secrets, migrations runner
 internal/wake/    connection-request client (Digest + Basic)
 migrations/       embedded goose migrations

@@ -18,7 +18,6 @@ type recordedCall struct {
 	method string
 	path   string
 	query  string
-	auth   string
 	idem   string
 	body   []byte
 }
@@ -31,7 +30,7 @@ func TestClientRequests(t *testing.T) {
 		mu.Lock()
 		calls = append(calls, recordedCall{
 			method: r.Method, path: r.URL.Path, query: r.URL.RawQuery,
-			auth: r.Header.Get("Authorization"), idem: r.Header.Get("Idempotency-Key"), body: b,
+			idem: r.Header.Get("Idempotency-Key"), body: b,
 		})
 		mu.Unlock()
 
@@ -76,7 +75,7 @@ func TestClientRequests(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "tok")
+	c, err := New(srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,11 +152,6 @@ func TestClientRequests(t *testing.T) {
 	if len(calls) != 16 {
 		t.Fatalf("made %d calls, want 16: %+v", len(calls), calls)
 	}
-	for _, call := range calls {
-		if call.auth != "Bearer tok" {
-			t.Errorf("%s %s auth = %q", call.method, call.path, call.auth)
-		}
-	}
 
 	byPath := map[string]recordedCall{}
 	for _, call := range calls {
@@ -207,7 +201,7 @@ func TestErrorDecoding(t *testing.T) {
 		fmt.Fprint(w, `{"error":{"code":"DEVICE_NOT_FOUND","message":"no such device","details":{"id":"x"}}}`)
 	}))
 	defer srv.Close()
-	c, _ := New(srv.URL, "")
+	c, _ := New(srv.URL)
 
 	_, err := c.GetDevice(context.Background(), "x", false)
 	var apiErr *Error
@@ -224,7 +218,7 @@ func TestErrorDecoding(t *testing.T) {
 		fmt.Fprint(w, "upstream down")
 	}))
 	defer plain.Close()
-	c2, _ := New(plain.URL, "")
+	c2, _ := New(plain.URL)
 	_, err = c2.GetDevice(context.Background(), "x", false)
 	if !errors.As(err, &apiErr) || apiErr.Status != 502 || apiErr.Message != "upstream down" {
 		t.Errorf("plain error = %+v", err)
@@ -285,16 +279,16 @@ func TestFaultHelper(t *testing.T) {
 
 func TestNewValidation(t *testing.T) {
 	for _, base := range []string{"", "ftp://x", "://bad", "http://"} {
-		if _, err := New(base, ""); err == nil {
+		if _, err := New(base); err == nil {
 			t.Errorf("New(%q) accepted", base)
 		}
 	}
-	c, err := New("http://127.0.0.1:8081/", "tok")
+	c, err := New("http://127.0.0.1:8081/")
 	if err != nil || c.base.String() != "http://127.0.0.1:8081" {
 		t.Errorf("New = %+v, %v", c, err)
 	}
 	hc := &http.Client{}
-	c, _ = New("http://127.0.0.1:8081", "", WithHTTPClient(hc))
+	c, _ = New("http://127.0.0.1:8081", WithHTTPClient(hc))
 	if c.hc != hc {
 		t.Error("WithHTTPClient did not apply")
 	}

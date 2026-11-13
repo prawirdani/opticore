@@ -27,9 +27,6 @@ func recvEvent(t *testing.T, ch <-chan Event) Event {
 
 func TestWatchParsesFrames(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "Bearer tok" {
-			t.Errorf("Authorization = %q", got)
-		}
 		if got := r.URL.Query().Get("type"); got != "bootstrap,task" {
 			t.Errorf("type = %q", got)
 		}
@@ -49,7 +46,7 @@ func TestWatchParsesFrames(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, _ := New(srv.URL, "tok")
+	c, _ := New(srv.URL)
 	ctx, cancel := context.WithCancel(context.Background())
 	events, errs := c.Watch(ctx, WatchFilter{Types: []string{"bootstrap", "task"}, DeviceID: "d1"})
 
@@ -110,7 +107,7 @@ func TestWatchReconnectResumes(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, _ := New(srv.URL, "")
+	c, _ := New(srv.URL)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	events, _ := c.Watch(ctx, WatchFilter{})
@@ -130,12 +127,12 @@ func TestWatchReconnectResumes(t *testing.T) {
 func TestWatchTerminalError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"error":{"code":"UNAUTHORIZED","message":"invalid token","details":{}}}`)
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"error":{"code":"STREAM_GONE","message":"no such stream","details":{}}}`)
 	}))
 	defer srv.Close()
 
-	c, _ := New(srv.URL, "bad")
+	c, _ := New(srv.URL)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	events, errs := c.Watch(ctx, WatchFilter{})
@@ -143,7 +140,7 @@ func TestWatchTerminalError(t *testing.T) {
 	select {
 	case _, ok := <-events:
 		if ok {
-			t.Error("got an event from a 401")
+			t.Error("got an event from a 404")
 		}
 	case <-ctx.Done():
 		t.Fatal("events channel did not close")
@@ -154,7 +151,7 @@ func TestWatchTerminalError(t *testing.T) {
 			t.Fatal("no terminal error")
 		}
 		var apiErr *Error
-		if !errors.As(err, &apiErr) || apiErr.Status != 401 || apiErr.Code != "UNAUTHORIZED" {
+		if !errors.As(err, &apiErr) || apiErr.Status != 404 || apiErr.Code != "STREAM_GONE" {
 			t.Errorf("terminal error = %+v", err)
 		}
 	case <-ctx.Done():

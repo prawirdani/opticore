@@ -78,11 +78,16 @@ func processAlive(pid int) bool {
 // isServe reports whether pid runs an opticore daemon, by reading its argv.
 // Linux keeps it in /proc; elsewhere `ps` is the only portable source.
 func isServe(pid int) bool {
-	args := processArgs(pid)
+	return isServeArgs(processArgs(pid))
+}
+
+// isServeArgs is the argv half of isServe, so it can be tested without a
+// process: an opticore binary whose first argument is serve.
+func isServeArgs(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
-	base := filepath.Base(args[0])
+	base := filepath.Base(strings.ReplaceAll(args[0], `\`, "/"))
 	if base != "opticore" && base != "opticore.exe" {
 		return false
 	}

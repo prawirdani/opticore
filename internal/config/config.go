@@ -32,11 +32,6 @@ type Config struct {
 
 	APIAddr string
 
-	// API security.
-	APIAuth          bool // require a bearer token on /v1
-	APIInsecureLocal bool // accept unauthenticated /v1 on loopback only
-	APIRequireReveal bool // ?reveal=1 needs a token with the reveal scope
-
 	HookURL         string
 	HookSecret      string
 	HookEvents      []string
@@ -193,9 +188,6 @@ func Load(getenv func(string) string) (Config, error) {
 		CWMPAuthUsername:   l.str("CWMP_AUTH_USERNAME", ""),
 		CWMPAuthPassword:   l.str("CWMP_AUTH_PASSWORD", ""),
 		APIAddr:            l.addr("OPTICORE_API_ADDR", ":8081"),
-		APIAuth:            l.boolean("OPTICORE_API_AUTH", true),
-		APIInsecureLocal:   l.boolean("OPTICORE_API_INSECURE_LOCAL", false),
-		APIRequireReveal:   l.boolean("OPTICORE_API_REQUIRE_REVEAL", true),
 		HookURL:            l.str("OPTICORE_HOOK_URL", ""),
 		HookSecret:         l.str("OPTICORE_HOOK_SECRET", ""),
 		HookEvents:         l.list("OPTICORE_HOOK_EVENTS", "0 BOOTSTRAP"),

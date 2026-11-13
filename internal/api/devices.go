@@ -120,10 +120,7 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
-	reveal := s.requireReveal(w, r)
-	if r.URL.Query().Get("reveal") == "1" && !reveal {
-		return
-	}
+	reveal := revealRequested(r)
 	d, err := s.st.GetDevice(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.deviceError(w, err)
@@ -150,10 +147,7 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listParams(w http.ResponseWriter, r *http.Request) {
-	reveal := s.requireReveal(w, r)
-	if r.URL.Query().Get("reveal") == "1" && !reveal {
-		return
-	}
+	reveal := revealRequested(r)
 	d, err := s.st.GetDevice(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.deviceError(w, err)
@@ -185,10 +179,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "VALIDATION", "invalid task status")
 		return
 	}
-	reveal := s.requireReveal(w, r)
-	if q.Get("reveal") == "1" && !reveal {
-		return
-	}
+	reveal := revealRequested(r)
 	tasks, err := s.st.ListTasksFiltered(r.Context(), r.PathValue("id"), status, clampLimit(q.Get("limit"), 100))
 	if err != nil {
 		s.deviceError(w, err)

@@ -25,7 +25,7 @@ type sseJobView struct {
 }
 
 // connectSSE opens the stream and returns its reader. Cancel closes the body.
-func connectSSE(t *testing.T, ts *httptest.Server, tok, query, lastID string) (*http.Response, *bufio.Reader, context.CancelFunc) {
+func connectSSE(t *testing.T, ts *httptest.Server, query, lastID string) (*http.Response, *bufio.Reader, context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	u := ts.URL + "/v1/events"
@@ -37,7 +37,6 @@ func connectSSE(t *testing.T, ts *httptest.Server, tok, query, lastID string) (*
 		cancel()
 		t.Fatalf("new SSE request: %v", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+tok)
 	if lastID != "" {
 		req.Header.Set("Last-Event-ID", lastID)
 	}
@@ -104,13 +103,12 @@ func createSSEJob(t *testing.T, st *store.Store, serials ...string) (store.Job, 
 
 func TestSSEJobTerminalTaskCounts(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "read", []string{"read"})
+	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
 	seedDevice(t, st, "00259E-HG8145V5-SER2", "SER2", time.Now().UTC(), "")
 	job, tasks := createSSEJob(t, st, "SER1", "SER2")
 
-	resp, br, cancel := connectSSE(t, ts, tok, "type=job", "")
+	resp, br, cancel := connectSSE(t, ts, "type=job", "")
 	defer cancel()
 	defer resp.Body.Close()
 
@@ -134,12 +132,11 @@ func TestSSEJobTerminalTaskCounts(t *testing.T) {
 
 func TestSSEJobCancelStatus(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "read", []string{"read"})
+	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
 	job, _ := createSSEJob(t, st, "SER1")
 
-	resp, br, cancel := connectSSE(t, ts, tok, "type=job", "")
+	resp, br, cancel := connectSSE(t, ts, "type=job", "")
 	defer cancel()
 	defer resp.Body.Close()
 
@@ -157,8 +154,7 @@ func TestSSEJobCancelStatus(t *testing.T) {
 
 func TestSSEJobFinishStatus(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "read", []string{"read"})
+	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
 	job, tasks := createSSEJob(t, st, "SER1")
 	if err := st.FinishTask(context.Background(), tasks[0].ID, "done", nil, nil, ""); err != nil {
@@ -166,7 +162,7 @@ func TestSSEJobFinishStatus(t *testing.T) {
 	}
 
 	// Connect after the task finished, so the count event is not replayed.
-	resp, br, cancel := connectSSE(t, ts, tok, "type=job", "")
+	resp, br, cancel := connectSSE(t, ts, "type=job", "")
 	defer cancel()
 	defer resp.Body.Close()
 
@@ -184,13 +180,12 @@ func TestSSEJobFinishStatus(t *testing.T) {
 
 func TestSSEJobResume(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "read", []string{"read"})
+	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
 	seedDevice(t, st, "00259E-HG8145V5-SER2", "SER2", time.Now().UTC(), "")
 	job, tasks := createSSEJob(t, st, "SER1", "SER2")
 
-	resp, br, cancel := connectSSE(t, ts, tok, "type=job", "")
+	resp, br, cancel := connectSSE(t, ts, "type=job", "")
 	defer cancel()
 	defer resp.Body.Close()
 
@@ -213,7 +208,7 @@ func TestSSEJobResume(t *testing.T) {
 
 	// Resume after the first job event: the second snapshot must arrive, the
 	// first must not be replayed.
-	resp2, br2, cancel2 := connectSSE(t, ts, tok, "type=job", first.id)
+	resp2, br2, cancel2 := connectSSE(t, ts, "type=job", first.id)
 	defer cancel2()
 	defer resp2.Body.Close()
 
@@ -237,8 +232,7 @@ func TestSSEJobResume(t *testing.T) {
 
 func TestSSEOldCursorFormats(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "read", []string{"read"})
+	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().Add(-time.Minute).UTC(), "")
 	job, tasks := createSSEJob(t, st, "SER1")
 	if err := st.FinishTask(context.Background(), tasks[0].ID, "done", nil, nil, ""); err != nil {
@@ -250,7 +244,7 @@ func TestSSEOldCursorFormats(t *testing.T) {
 		`SELECT max(id) FROM events`).Scan(&eventID); err != nil {
 		t.Fatalf("max event id: %v", err)
 	}
-	resp, br, cancel := connectSSE(t, ts, tok, "type=job", "e"+strconv.FormatInt(eventID, 10))
+	resp, br, cancel := connectSSE(t, ts, "type=job", "e"+strconv.FormatInt(eventID, 10))
 	defer cancel()
 	defer resp.Body.Close()
 	_, v := readJobEvent(t, br)
@@ -264,7 +258,7 @@ func TestSSEOldCursorFormats(t *testing.T) {
 	}
 	oldTask := "t" + strconv.FormatInt(task.ID, 10) + ":" +
 		strconv.FormatInt(task.UpdatedAt.UnixNano(), 10)
-	resp2, br2, cancel2 := connectSSE(t, ts, tok, "type=job", oldTask)
+	resp2, br2, cancel2 := connectSSE(t, ts, "type=job", oldTask)
 	defer cancel2()
 	defer resp2.Body.Close()
 	_, v2 := readJobEvent(t, br2)
@@ -275,13 +269,12 @@ func TestSSEOldCursorFormats(t *testing.T) {
 
 func TestSSETypeFilter(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "read", []string{"read"})
+	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
 
 	// type=task: the terminal task is emitted, its job event is not.
 	_, tasks := createSSEJob(t, st, "SER1")
-	resp, br, cancel := connectSSE(t, ts, tok, "type=task", "")
+	resp, br, cancel := connectSSE(t, ts, "type=task", "")
 	if err := st.FinishTask(context.Background(), tasks[0].ID, "done", nil, nil, ""); err != nil {
 		cancel()
 		resp.Body.Close()
@@ -304,7 +297,7 @@ func TestSSETypeFilter(t *testing.T) {
 
 	// type=job: only the job event arrives, even though a task also moved.
 	job, tasks2 := createSSEJob(t, st, "SER1")
-	resp2, br2, cancel2 := connectSSE(t, ts, tok, "type=job", "")
+	resp2, br2, cancel2 := connectSSE(t, ts, "type=job", "")
 	defer cancel2()
 	defer resp2.Body.Close()
 	if err := st.FinishTask(context.Background(), tasks2[0].ID, "done", nil, nil, ""); err != nil {

@@ -87,7 +87,7 @@ func testStore(t *testing.T) *store.Store {
 	}
 	t.Cleanup(s.Close)
 	if _, err := s.Pool().Exec(context.Background(), `TRUNCATE devices, tasks, events,
-		jobs, firmware, api_tokens RESTART IDENTITY CASCADE`); err != nil {
+		jobs, firmware RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return s
@@ -101,24 +101,15 @@ func testKey() []byte {
 	return key
 }
 
-func newTestServer(t *testing.T, st *store.Store, opts Options) (*Server, *httptest.Server, *acs.Service) {
+func newTestServer(t *testing.T, st *store.Store) (*Server, *httptest.Server, *acs.Service) {
 	t.Helper()
 	key := testKey()
 	svc := &acs.Service{Store: st, Key: key}
-	srv := New(st, svc, key, slog.New(slog.DiscardHandler), opts)
+	srv := New(st, svc, key, slog.New(slog.DiscardHandler))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(srv.Close)
 	return srv, ts, svc
-}
-
-func createToken(t *testing.T, st *store.Store, name string, scopes []string) string {
-	t.Helper()
-	tok, err := st.CreateToken(context.Background(), name, scopes)
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-	return tok
 }
 
 func seedDevice(t *testing.T, st *store.Store, id, serial string, at time.Time, crURL string) {
@@ -154,7 +145,7 @@ func seedDevice(t *testing.T, st *store.Store, id, serial string, at time.Time, 
 	}
 }
 
-func request(t *testing.T, client *http.Client, method, url, token string, body any) *http.Response {
+func request(t *testing.T, client *http.Client, method, url string, body any) *http.Response {
 	t.Helper()
 	var r io.Reader
 	if body != nil {
@@ -167,9 +158,6 @@ func request(t *testing.T, client *http.Client, method, url, token string, body 
 	req, err := http.NewRequest(method, url, r)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -202,115 +190,33 @@ func errorCode(t *testing.T, resp *http.Response) string {
 	return body.Error.Code
 }
 
-func TestAuthScopes(t *testing.T) {
+// The /v1 API takes no credentials: the listener address is the control.
+func TestNoAuthorizationRequired(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
+	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
 
-	readTok := createToken(t, st, "read", []string{"read"})
-	writeTok := createToken(t, st, "write", []string{"write"})
-	revealTok := createToken(t, st, "reveal", []string{"read", "reveal"})
-	base := ts.URL + "/v1/devices"
-
-	if resp := request(t, ts.Client(), http.MethodGet, base, "", nil); resp.StatusCode != 401 {
-		t.Fatalf("no token status = %d, want 401", resp.StatusCode)
-	} else if code := errorCode(t, resp); code != "UNAUTHORIZED" {
-		t.Errorf("no token code = %q", code)
-	}
-	if resp := request(t, ts.Client(), http.MethodGet, base, "bogus", nil); resp.StatusCode != 401 {
-		t.Errorf("bad token status = %d, want 401", resp.StatusCode)
-	}
-	resp := request(t, ts.Client(), http.MethodGet, base, writeTok, nil)
-	if resp.StatusCode != 403 {
-		t.Errorf("write token on GET = %d, want 403", resp.StatusCode)
-	} else if code := errorCode(t, resp); code != "FORBIDDEN" {
-		t.Errorf("write token code = %q", code)
-	}
-	resp = request(t, ts.Client(), http.MethodGet, base, readTok, nil)
-	if resp.StatusCode != 200 {
-		t.Errorf("read token GET = %d, want 200", resp.StatusCode)
-	}
+	resp := request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices", nil)
 	resp.Body.Close()
-
-	deviceTasks := ts.URL + "/v1/devices/SER1/tasks"
-	resp = request(t, ts.Client(), http.MethodPost, deviceTasks, readTok, map[string]any{"name": "reboot"})
-	if resp.StatusCode != 403 {
-		t.Errorf("read token POST = %d, want 403", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/devices without a token = %d, want 200", resp.StatusCode)
 	}
+	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/tasks",
+		map[string]any{"name": "reboot"})
 	resp.Body.Close()
-
-	resp = request(t, ts.Client(), http.MethodPost, deviceTasks, writeTok, map[string]any{"name": "reboot"})
-	if resp.StatusCode != 202 {
-		t.Errorf("write token POST = %d, want 202", resp.StatusCode)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("POST without a token = %d, want 202", resp.StatusCode)
 	}
+	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1/params?reveal=1", nil)
 	resp.Body.Close()
-
-	params := ts.URL + "/v1/devices/SER1/params?reveal=1"
-	resp = request(t, ts.Client(), http.MethodGet, params, readTok, nil)
-	if resp.StatusCode != 403 {
-		t.Errorf("reveal without scope = %d, want 403", resp.StatusCode)
-	}
-	resp.Body.Close()
-
-	resp = request(t, ts.Client(), http.MethodGet, params, revealTok, nil)
-	if resp.StatusCode != 200 {
-		t.Errorf("reveal token = %d, want 200", resp.StatusCode)
-	}
-	resp.Body.Close()
-}
-
-func TestInsecureLocalValidation(t *testing.T) {
-	if err := CheckInsecureLocal("127.0.0.1:8081"); err != nil {
-		t.Errorf("loopback v4: %v", err)
-	}
-	if err := CheckInsecureLocal("[::1]:8081"); err != nil {
-		t.Errorf("loopback v6: %v", err)
-	}
-	if err := CheckInsecureLocal("localhost:8081"); err != nil {
-		t.Errorf("localhost: %v", err)
-	}
-	if err := CheckInsecureLocal(":8081"); err == nil {
-		t.Error("all-interfaces listener accepted")
-	}
-	if err := CheckInsecureLocal("10.0.0.5:8081"); err == nil {
-		t.Error("non-loopback listener accepted")
-	}
-}
-
-func TestInsecureLocalSkipsAuth(t *testing.T) {
-	st := testStore(t)
-	srv, ts, _ := newTestServer(t, st, Options{
-		AllowInsecureLocal: true,
-		ListenAddr:         "127.0.0.1:0",
-		RequireRevealScope: true,
-	})
-	if srv.Err() != nil {
-		t.Fatalf("insecure-local refused a loopback listener: %v", srv.Err())
-	}
-	resp := request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices", "", nil)
-	if resp.StatusCode != 200 {
-		t.Errorf("insecure-local GET = %d, want 200", resp.StatusCode)
-	}
-	resp.Body.Close()
-
-	refused := New(st, nil, testKey(), slog.New(slog.DiscardHandler), Options{
-		AllowInsecureLocal: true,
-		ListenAddr:         "10.0.0.5:8081",
-	})
-	if refused.Err() == nil {
-		t.Fatal("insecure-local accepted a non-loopback listener")
-	}
-	w := httptest.NewRecorder()
-	refused.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/devices", nil))
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("refused handler = %d, want 503", w.Code)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reveal without a token = %d, want 200", resp.StatusCode)
 	}
 }
 
 func TestDeviceJSONAndFreshness(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "read", []string{"read"})
+	_, ts, _ := newTestServer(t, st)
 	now := time.Now().UTC()
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", now, "http://10.20.3.41:7547/abc")
 
@@ -332,7 +238,7 @@ func TestDeviceJSONAndFreshness(t *testing.T) {
 			Total      int     `json:"total"`
 		} `json:"meta"`
 	}
-	resp := request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices", tok, nil)
+	resp := request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices", nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("GET devices = %d", resp.StatusCode)
 	}
@@ -357,7 +263,7 @@ func TestDeviceJSONAndFreshness(t *testing.T) {
 			Tasks  map[string]int       `json:"tasks"`
 		} `json:"data"`
 	}
-	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1", tok, nil)
+	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1", nil)
 	decode(t, resp, &detail)
 	if detail.Data.ID == "" || len(detail.Data.Params) != 3 {
 		t.Errorf("detail = %+v", detail.Data)
@@ -372,7 +278,7 @@ func TestDeviceJSONAndFreshness(t *testing.T) {
 		`UPDATE devices SET last_inform = $1 WHERE serial = 'SER1'`, at); err != nil {
 		t.Fatal(err)
 	}
-	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices", tok, nil)
+	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices", nil)
 	decode(t, resp, &list)
 	if list.Data[0].Freshness != "stale" {
 		t.Errorf("freshness at 3 intervals = %q, want stale", list.Data[0].Freshness)
@@ -382,7 +288,7 @@ func TestDeviceJSONAndFreshness(t *testing.T) {
 		`UPDATE devices SET last_inform = $1 WHERE serial = 'SER1'`, at); err != nil {
 		t.Fatal(err)
 	}
-	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices", tok, nil)
+	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices", nil)
 	decode(t, resp, &list)
 	if list.Data[0].Freshness != "offline" {
 		t.Errorf("freshness at 7 intervals = %q, want offline", list.Data[0].Freshness)
@@ -391,9 +297,7 @@ func TestDeviceJSONAndFreshness(t *testing.T) {
 
 func TestParamsMaskingAndReveal(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	readTok := createToken(t, st, "read", []string{"read"})
-	revealTok := createToken(t, st, "reveal", []string{"read", "reveal"})
+	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
 
 	var out struct {
@@ -403,7 +307,7 @@ func TestParamsMaskingAndReveal(t *testing.T) {
 			Type  string `json:"type"`
 		} `json:"data"`
 	}
-	resp := request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1/params", readTok, nil)
+	resp := request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1/params", nil)
 	decode(t, resp, &out)
 	values := map[string]string{}
 	for _, p := range out.Data {
@@ -416,7 +320,7 @@ func TestParamsMaskingAndReveal(t *testing.T) {
 		t.Errorf("ParameterKey = %q, want visible", values["InternetGatewayDevice.ManagementServer.ParameterKey"])
 	}
 
-	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1/params?reveal=1", revealTok, nil)
+	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1/params?reveal=1", nil)
 	decode(t, resp, &out)
 	for _, p := range out.Data {
 		if p.Path == "InternetGatewayDevice.ManagementServer.Password" && p.Value != "••••" {
@@ -424,7 +328,7 @@ func TestParamsMaskingAndReveal(t *testing.T) {
 		}
 	}
 
-	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1/params?prefix=InternetGatewayDevice.ManagementServer.", readTok, nil)
+	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1/params?prefix=InternetGatewayDevice.ManagementServer.", nil)
 	decode(t, resp, &out)
 	if len(out.Data) != 2 {
 		t.Errorf("prefix params = %d, want 2", len(out.Data))
@@ -433,8 +337,7 @@ func TestParamsMaskingAndReveal(t *testing.T) {
 
 func TestBatchCreationAndIdempotency(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "write", []string{"read", "write"})
+	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
 
 	batch := []map[string]any{
@@ -443,7 +346,6 @@ func TestBatchCreationAndIdempotency(t *testing.T) {
 	}
 	body, _ := json.Marshal(batch)
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/devices/SER1/tasks", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Idempotency-Key", "req-1")
 	resp, err := ts.Client().Do(req)
 	if err != nil {
@@ -467,7 +369,6 @@ func TestBatchCreationAndIdempotency(t *testing.T) {
 	}
 
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/v1/devices/SER1/tasks", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Idempotency-Key", "req-1")
 	resp, err = ts.Client().Do(req)
 	if err != nil {
@@ -494,14 +395,14 @@ func TestBatchCreationAndIdempotency(t *testing.T) {
 	}
 
 	// unknown name
-	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/tasks", tok,
+	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/tasks",
 		map[string]any{"name": "download"})
 	if resp.StatusCode != 400 || errorCode(t, resp) != "VALIDATION" {
 		t.Errorf("unknown name = %d", resp.StatusCode)
 	}
 
 	// reserved connection-request path
-	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/tasks", tok,
+	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/tasks",
 		map[string]any{"name": "set", "args": map[string]any{"values": [][]string{
 			{"InternetGatewayDevice.ManagementServer.ConnectionRequestPassword", "x", "xsd:string"},
 		}}})
@@ -510,7 +411,7 @@ func TestBatchCreationAndIdempotency(t *testing.T) {
 	}
 
 	// unknown device
-	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/NOPE/tasks", tok,
+	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/NOPE/tasks",
 		map[string]any{"name": "reboot"})
 	if resp.StatusCode != 404 || errorCode(t, resp) != "DEVICE_NOT_FOUND" {
 		t.Errorf("unknown device = %d", resp.StatusCode)
@@ -519,12 +420,10 @@ func TestBatchCreationAndIdempotency(t *testing.T) {
 
 func TestTaskRevealMasksSecrets(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	readTok := createToken(t, st, "read", []string{"read"})
-	revealTok := createToken(t, st, "reveal", []string{"read", "write", "reveal"})
+	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
 
-	resp := request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/tasks", revealTok,
+	resp := request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/tasks",
 		map[string]any{"name": "set", "args": map[string]any{"values": [][]string{
 			{"InternetGatewayDevice.ManagementServer.Password", "hunter2", "xsd:string"},
 		}}})
@@ -546,14 +445,14 @@ func TestTaskRevealMasksSecrets(t *testing.T) {
 		} `json:"data"`
 	}
 	resp = request(t, ts.Client(), http.MethodGet,
-		fmt.Sprintf("%s/v1/tasks/%d", ts.URL, created.Data[0].ID), readTok, nil)
+		fmt.Sprintf("%s/v1/tasks/%d", ts.URL, created.Data[0].ID), nil)
 	decode(t, resp, &task)
 	if task.Data.Args.Values[0][1] != "••••" {
 		t.Errorf("masked task arg = %q", task.Data.Args.Values[0][1])
 	}
 
 	resp = request(t, ts.Client(), http.MethodGet,
-		fmt.Sprintf("%s/v1/tasks/%d?reveal=1", ts.URL, created.Data[0].ID), revealTok, nil)
+		fmt.Sprintf("%s/v1/tasks/%d?reveal=1", ts.URL, created.Data[0].ID), nil)
 	decode(t, resp, &task)
 	if task.Data.Args.Values[0][1] != "hunter2" {
 		t.Errorf("revealed task arg = %q", task.Data.Args.Values[0][1])
@@ -562,11 +461,10 @@ func TestTaskRevealMasksSecrets(t *testing.T) {
 
 func TestCancelPendingVsConflict(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "write", []string{"read", "write"})
+	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
 
-	resp := request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/tasks", tok,
+	resp := request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/tasks",
 		map[string]any{"name": "reboot"})
 	var created struct {
 		Data []struct {
@@ -580,19 +478,19 @@ func TestCancelPendingVsConflict(t *testing.T) {
 	id := created.Data[0].ID
 
 	resp = request(t, ts.Client(), http.MethodDelete,
-		fmt.Sprintf("%s/v1/devices/SER1/tasks/%d", ts.URL, id), tok, nil)
+		fmt.Sprintf("%s/v1/devices/SER1/tasks/%d", ts.URL, id), nil)
 	if resp.StatusCode != 204 {
 		t.Errorf("cancel pending = %d, want 204", resp.StatusCode)
 	}
 	resp.Body.Close()
 
 	resp = request(t, ts.Client(), http.MethodDelete,
-		fmt.Sprintf("%s/v1/devices/SER1/tasks/%d", ts.URL, id), tok, nil)
+		fmt.Sprintf("%s/v1/devices/SER1/tasks/%d", ts.URL, id), nil)
 	if resp.StatusCode != 409 || errorCode(t, resp) != "CONFLICT" {
 		t.Errorf("cancel cancelled = %d", resp.StatusCode)
 	}
 
-	resp = request(t, ts.Client(), http.MethodDelete, ts.URL+"/v1/devices/SER1/tasks/999999", tok, nil)
+	resp = request(t, ts.Client(), http.MethodDelete, ts.URL+"/v1/devices/SER1/tasks/999999", nil)
 	if resp.StatusCode != 404 || errorCode(t, resp) != "TASK_NOT_FOUND" {
 		t.Errorf("cancel missing = %d", resp.StatusCode)
 	}
@@ -600,11 +498,10 @@ func TestCancelPendingVsConflict(t *testing.T) {
 
 func TestWakeConflictAndUnreachable(t *testing.T) {
 	st := testStore(t)
-	_, ts, svc := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "write", []string{"read", "write"})
+	_, ts, svc := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
 
-	resp := request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/wake", tok, nil)
+	resp := request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/wake", nil)
 	if resp.StatusCode != 409 || errorCode(t, resp) != "CONFLICT" {
 		t.Errorf("wake without CR URL = %d", resp.StatusCode)
 	}
@@ -618,7 +515,7 @@ func TestWakeConflictAndUnreachable(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc.Waker = wake.New(200*time.Millisecond, nil)
-	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/wake", tok, nil)
+	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/wake", nil)
 	if resp.StatusCode != 502 || errorCode(t, resp) != "DEVICE_UNREACHABLE" {
 		t.Errorf("wake unreachable = %d", resp.StatusCode)
 	}
@@ -632,7 +529,7 @@ func TestWakeConflictAndUnreachable(t *testing.T) {
 		`UPDATE devices SET cr_url = $1 WHERE serial = 'SER1'`, reachable.URL); err != nil {
 		t.Fatal(err)
 	}
-	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/wake", tok, nil)
+	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/SER1/wake", nil)
 	if resp.StatusCode != 202 {
 		t.Errorf("wake reachable = %d, want 202", resp.StatusCode)
 	}
@@ -641,20 +538,19 @@ func TestWakeConflictAndUnreachable(t *testing.T) {
 
 func TestDeleteDeviceCascades(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "write", []string{"read", "write"})
+	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", time.Now().UTC(), "")
 	if _, err := st.CreateTasks(context.Background(), "SER1", []store.NewTask{{Name: "reboot"}}); err != nil {
 		t.Fatal(err)
 	}
 
-	resp := request(t, ts.Client(), http.MethodDelete, ts.URL+"/v1/devices/SER1", tok, nil)
+	resp := request(t, ts.Client(), http.MethodDelete, ts.URL+"/v1/devices/SER1", nil)
 	if resp.StatusCode != 204 {
 		t.Errorf("delete = %d, want 204", resp.StatusCode)
 	}
 	resp.Body.Close()
 
-	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1", tok, nil)
+	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices/SER1", nil)
 	if resp.StatusCode != 404 || errorCode(t, resp) != "DEVICE_NOT_FOUND" {
 		t.Errorf("get after delete = %d", resp.StatusCode)
 	}
@@ -699,13 +595,11 @@ func readSSE(br *bufio.Reader) (sseFrame, error) {
 
 func TestSSEBootstrapTaskAndResume(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "read", []string{"read"})
+	_, ts, _ := newTestServer(t, st)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/events", nil)
-	req.Header.Set("Authorization", "Bearer "+tok)
 	resp, err := ts.Client().Do(req)
 	if err != nil {
 		t.Fatalf("connect SSE: %v", err)
@@ -751,7 +645,6 @@ func TestSSEBootstrapTaskAndResume(t *testing.T) {
 	cctx, ccancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer ccancel()
 	req2, _ := http.NewRequestWithContext(cctx, http.MethodGet, ts.URL+"/v1/events", nil)
-	req2.Header.Set("Authorization", "Bearer "+tok)
 	req2.Header.Set("Last-Event-ID", bootID)
 	resp2, err := ts.Client().Do(req2)
 	if err != nil {
@@ -773,8 +666,7 @@ func TestSSEBootstrapTaskAndResume(t *testing.T) {
 
 func TestDeviceCursorPagination(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "read", []string{"read"})
+	_, ts, _ := newTestServer(t, st)
 	base := time.Now().UTC().Truncate(time.Second)
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", base.Add(-2*time.Minute), "")
 	seedDevice(t, st, "00259E-HG8145V5-SER2", "SER2", base.Add(-time.Minute), "")
@@ -790,7 +682,7 @@ func TestDeviceCursorPagination(t *testing.T) {
 		} `json:"meta"`
 	}
 	var p1 page
-	resp := request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices?limit=2", tok, nil)
+	resp := request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices?limit=2", nil)
 	decode(t, resp, &p1)
 	if len(p1.Data) != 2 || p1.Data[0].Serial != "SER3" || p1.Data[1].Serial != "SER2" {
 		t.Fatalf("page 1 = %+v", p1)
@@ -800,7 +692,7 @@ func TestDeviceCursorPagination(t *testing.T) {
 	}
 	var p2 page
 	resp = request(t, ts.Client(), http.MethodGet,
-		ts.URL+"/v1/devices?limit=2&cursor="+url.QueryEscape(*p1.Meta.NextCursor), tok, nil)
+		ts.URL+"/v1/devices?limit=2&cursor="+url.QueryEscape(*p1.Meta.NextCursor), nil)
 	decode(t, resp, &p2)
 	if len(p2.Data) != 1 || p2.Data[0].Serial != "SER1" {
 		t.Fatalf("page 2 = %+v", p2)
@@ -813,27 +705,9 @@ func TestDeviceCursorPagination(t *testing.T) {
 	}
 
 	var filtered page
-	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices?serial_prefix=SER2", tok, nil)
+	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices?serial_prefix=SER2", nil)
 	decode(t, resp, &filtered)
 	if len(filtered.Data) != 1 || filtered.Data[0].Serial != "SER2" {
 		t.Errorf("filtered = %+v", filtered)
-	}
-}
-
-// OPTICORE_API_AUTH=false: no token, any client, reveal included.
-func TestNoAuth(t *testing.T) {
-	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{NoAuth: true, RequireRevealScope: true})
-
-	resp := request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices", "", nil)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /v1/devices without a token = %d, want 200", resp.StatusCode)
-	}
-	// A write without a token must reach the handler, not be stopped by auth.
-	res := request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/x/tasks", "", map[string]int{"nope": 1})
-	res.Body.Close()
-	if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden {
-		t.Fatalf("POST without a token = %d, auth still enforced", res.StatusCode)
 	}
 }

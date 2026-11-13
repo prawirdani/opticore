@@ -48,7 +48,8 @@ GenieACS owns `7547`; the built-in defaults are still `7547`/`8081`.
   handler). Standard library only, never imports `internal/`; hook wire types
   live here and `internal/hook` aliases them.
 - `internal/hook` — the daemon's side of the hook call.
-- `internal/api` — `/v1` handlers, SSE, tokens.
+- `internal/api` — `/v1` handlers and SSE. No auth: the listener address is the
+  boundary.
 - `internal/store` — hand-written SQL, secret sealing, migrations runner.
 - `internal/tui` — operator console over `Deps` interfaces; no SQL of its own,
   writes go through `acs.Service`. Its tests are pure (fake readers), so they
@@ -66,8 +67,8 @@ GenieACS owns `7547`; the built-in defaults are still `7547`/`8081`.
   `<string>` arrays, `OUI-ProductClass-Serial`). Never use `encoding/xml` in the
   production path; it is only the test oracle for the hand-written scanner.
 - Leaves ending in `password|passphrase|secret|psk|key` are sealed with
-  `OPTICORE_SECRET_KEY` and rendered `••••` unless a `reveal`-scoped request
-  asks otherwise. Do not log or return them.
+  `OPTICORE_SECRET_KEY` and rendered `••••` unless the request asks `reveal=1`.
+  Do not log or return them.
 - Handler calls for one session are sequential, and at most one RPC is in
   flight. Do not add per-session goroutines.
 - One daemon per database, enforced by a PostgreSQL advisory lock. Never start

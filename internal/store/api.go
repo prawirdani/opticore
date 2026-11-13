@@ -2,51 +2,12 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 )
-
-// ErrTokenNotFound reports an unknown, revoked or malformed API token.
-var ErrTokenNotFound = errors.New("api token not found")
-
-// CreateToken mints a token and stores only its SHA-256 hex digest. The
-// plaintext is returned once; it is never recoverable from the row.
-func (s *Store) CreateToken(ctx context.Context, name string, scopes []string) (string, error) {
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return "", fmt.Errorf("store: create token: %w", err)
-	}
-	token := base64.RawURLEncoding.EncodeToString(raw)
-	sum := sha256.Sum256([]byte(token))
-	if _, err := s.pool.Exec(ctx, `INSERT INTO api_tokens (name, hash, scopes)
-		VALUES ($1, $2, $3)`, name, hex.EncodeToString(sum[:]), scopes); err != nil {
-		return "", fmt.Errorf("store: create token: %w", err)
-	}
-	return token, nil
-}
-
-// LookupToken resolves a plaintext token to its scopes. Revoked tokens are
-// not found.
-func (s *Store) LookupToken(ctx context.Context, plaintext string) ([]string, error) {
-	sum := sha256.Sum256([]byte(plaintext))
-	var scopes []string
-	err := s.pool.QueryRow(ctx, `SELECT scopes FROM api_tokens
-		WHERE hash = $1 AND revoked_at IS NULL`, hex.EncodeToString(sum[:])).Scan(&scopes)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrTokenNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: lookup token: %w", err)
-	}
-	return scopes, nil
-}
 
 // DevicePageFilter selects one keyset page of devices. The zero After values
 // start at the newest device.

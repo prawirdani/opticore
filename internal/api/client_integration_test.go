@@ -13,11 +13,10 @@ import (
 // tests in client/.
 func TestSDKTaskBuildersAccepted(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "sdk", []string{"read", "write", "reveal"})
+	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SDK1", "SDK1", time.Now().UTC(), "")
 
-	c, err := client.New(ts.URL, tok)
+	c, err := client.New(ts.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,11 +66,10 @@ func TestSDKTaskBuildersAccepted(t *testing.T) {
 // queued through the SDK.
 func TestSDKWatchReceivesTask(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "sdk-watch", []string{"read", "write"})
+	_, ts, _ := newTestServer(t, st)
 	seedDevice(t, st, "00259E-HG8145V5-SDK2", "SDK2", time.Now().UTC(), "")
 
-	c, err := client.New(ts.URL, tok)
+	c, err := client.New(ts.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

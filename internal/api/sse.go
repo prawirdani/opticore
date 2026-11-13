@@ -25,10 +25,7 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL", "streaming unsupported")
 		return
 	}
-	reveal := s.requireReveal(w, r)
-	if r.URL.Query().Get("reveal") == "1" && !reveal {
-		return
-	}
+	reveal := revealRequested(r)
 	types := typeFilter(r.URL.Query().Get("type"))
 	device := r.URL.Query().Get("device_id")
 	cursor := r.Header.Get("Last-Event-ID")

@@ -252,10 +252,7 @@ func (s *Server) deleteDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
-	reveal := s.requireReveal(w, r)
-	if r.URL.Query().Get("reveal") == "1" && !reveal {
-		return
-	}
+	reveal := revealRequested(r)
 	id, err := strconv.ParseInt(r.PathValue("taskId"), 10, 64)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION", "task id must be an integer")

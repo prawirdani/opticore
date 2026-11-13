@@ -13,8 +13,7 @@ import (
 
 func TestJobsAPI(t *testing.T) {
 	st := testStore(t)
-	_, ts, _ := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "jobs", []string{"read", "write"})
+	_, ts, _ := newTestServer(t, st)
 	now := time.Now().UTC()
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", now, "")
 	seedDevice(t, st, "00259E-HG8145V5-SER2", "SER2", now, "")
@@ -25,7 +24,7 @@ func TestJobsAPI(t *testing.T) {
 		"select":       map[string]any{"serials": []string{"SER1", "SER2"}},
 		"max_parallel": 1,
 	}
-	resp := request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/jobs", tok, body)
+	resp := request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/jobs", body)
 	if resp.StatusCode != 202 {
 		t.Fatalf("POST jobs = %d", resp.StatusCode)
 	}
@@ -50,7 +49,7 @@ func TestJobsAPI(t *testing.T) {
 			Failures []store.JobFailure `json:"failures"`
 		} `json:"data"`
 	}
-	resp = request(t, ts.Client(), http.MethodGet, fmt.Sprintf("%s/v1/jobs/%d", ts.URL, jobID), tok, nil)
+	resp = request(t, ts.Client(), http.MethodGet, fmt.Sprintf("%s/v1/jobs/%d", ts.URL, jobID), nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("GET job = %d", resp.StatusCode)
 	}
@@ -81,7 +80,7 @@ func TestJobsAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp = request(t, ts.Client(), http.MethodGet, fmt.Sprintf("%s/v1/jobs/%d", ts.URL, jobID), tok, nil)
+	resp = request(t, ts.Client(), http.MethodGet, fmt.Sprintf("%s/v1/jobs/%d", ts.URL, jobID), nil)
 	decode(t, resp, &detail)
 	if len(detail.Data.Failures) != 1 {
 		t.Fatalf("failures = %+v", detail.Data.Failures)
@@ -98,7 +97,7 @@ func TestJobsAPI(t *testing.T) {
 			Counts map[string]int `json:"counts"`
 		} `json:"data"`
 	}
-	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/jobs", tok, nil)
+	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/jobs", nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("GET jobs = %d", resp.StatusCode)
 	}
@@ -108,12 +107,12 @@ func TestJobsAPI(t *testing.T) {
 	}
 
 	// Cancel leaves the failed task alone and cancels the pending one.
-	resp = request(t, ts.Client(), http.MethodDelete, fmt.Sprintf("%s/v1/jobs/%d", ts.URL, jobID), tok, nil)
+	resp = request(t, ts.Client(), http.MethodDelete, fmt.Sprintf("%s/v1/jobs/%d", ts.URL, jobID), nil)
 	if resp.StatusCode != 204 {
 		t.Fatalf("DELETE job = %d", resp.StatusCode)
 	}
 	resp.Body.Close()
-	resp = request(t, ts.Client(), http.MethodGet, fmt.Sprintf("%s/v1/jobs/%d", ts.URL, jobID), tok, nil)
+	resp = request(t, ts.Client(), http.MethodGet, fmt.Sprintf("%s/v1/jobs/%d", ts.URL, jobID), nil)
 	decode(t, resp, &detail)
 	if detail.Data.Status != "cancelled" || detail.Data.Counts["cancelled"] != 1 || detail.Data.Counts["failed"] != 1 {
 		t.Errorf("cancelled job = %+v", detail.Data)
@@ -124,7 +123,7 @@ func TestJobsAPI(t *testing.T) {
 		"name": "bad", "task": map[string]any{"name": "reboot"},
 		"select": map[string]any{"serials": []string{"SER1", "NOPE"}},
 	}
-	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/jobs", tok, bad)
+	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/jobs", bad)
 	if resp.StatusCode != 400 {
 		t.Fatalf("unknown serial = %d, want 400", resp.StatusCode)
 	}
@@ -138,24 +137,24 @@ func TestJobsAPI(t *testing.T) {
 	if errBody.Error.Code != "VALIDATION" || !strings.Contains(errBody.Error.Message, "NOPE") {
 		t.Errorf("unknown serial body = %+v", errBody.Error)
 	}
-	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/jobs", tok, nil)
+	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/jobs", nil)
 	decode(t, resp, &list)
 	if len(list.Data) != 1 {
 		t.Errorf("jobs after failed create = %d, want 1", len(list.Data))
 	}
 
-	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/jobs", tok,
+	resp = request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/jobs",
 		map[string]any{"name": "empty", "task": map[string]any{"name": "reboot"}})
 	if resp.StatusCode != 400 {
 		t.Errorf("empty selector = %d, want 400", resp.StatusCode)
 	}
 	resp.Body.Close()
 
-	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/jobs/999999", tok, nil)
+	resp = request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/jobs/999999", nil)
 	if resp.StatusCode != 404 || errorCode(t, resp) != "JOB_NOT_FOUND" {
 		t.Errorf("missing job = %d", resp.StatusCode)
 	}
-	resp = request(t, ts.Client(), http.MethodDelete, ts.URL+"/v1/jobs/999999", tok, nil)
+	resp = request(t, ts.Client(), http.MethodDelete, ts.URL+"/v1/jobs/999999", nil)
 	if resp.StatusCode != 404 || errorCode(t, resp) != "JOB_NOT_FOUND" {
 		t.Errorf("cancel missing job = %d", resp.StatusCode)
 	}

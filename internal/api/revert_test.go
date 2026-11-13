@@ -44,14 +44,11 @@ func sealedPrev(t *testing.T, value string) string {
 	return "enc:" + sealed
 }
 
-func postRevert(t *testing.T, ts *httptest.Server, url, token, idem string) *http.Response {
+func postRevert(t *testing.T, ts *httptest.Server, url, idem string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	if idem != "" {
 		req.Header.Set("Idempotency-Key", idem)
@@ -65,9 +62,7 @@ func postRevert(t *testing.T, ts *httptest.Server, url, token, idem string) *htt
 
 func TestRevertTaskAPI(t *testing.T) {
 	st := testStore(t)
-	_, ts, svc := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "rw", []string{"read", "write"})
-	readTok := createToken(t, st, "read", []string{"read"})
+	_, ts, svc := newTestServer(t, st)
 	now := time.Now().UTC()
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", now, "")
 	seedDevice(t, st, "00259E-HG8145V5-SER2", "SER2", now, "")
@@ -77,12 +72,7 @@ func TestRevertTaskAPI(t *testing.T) {
 		`{"InternetGatewayDevice.ManagementServer.Password":["`+sealed+`","xsd:string"]}`)
 
 	url := fmt.Sprintf("%s/v1/devices/SER1/tasks/%d/revert", ts.URL, orig.ID)
-	if resp := postRevert(t, ts, url, readTok, ""); resp.StatusCode != http.StatusForbidden {
-		t.Errorf("read token revert = %d, want 403", resp.StatusCode)
-		resp.Body.Close()
-	}
-
-	resp := postRevert(t, ts, url, tok, "")
+	resp := postRevert(t, ts, url, "")
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("revert = %d, want 202", resp.StatusCode)
 	}
@@ -119,7 +109,7 @@ func TestRevertTaskAPI(t *testing.T) {
 	}
 
 	// Idempotency-Key replays the same revert task.
-	first := postRevert(t, ts, url, tok, "revert-1")
+	first := postRevert(t, ts, url, "revert-1")
 	if first.StatusCode != http.StatusAccepted {
 		t.Fatalf("idempotent revert = %d", first.StatusCode)
 	}
@@ -129,7 +119,7 @@ func TestRevertTaskAPI(t *testing.T) {
 		} `json:"data"`
 	}
 	decode(t, first, &firstBody)
-	second := postRevert(t, ts, url, tok, "revert-1")
+	second := postRevert(t, ts, url, "revert-1")
 	var secondBody struct {
 		Data []struct {
 			ID int64 `json:"id"`
@@ -142,19 +132,19 @@ func TestRevertTaskAPI(t *testing.T) {
 
 	// Wrong device and unknown task both look like a missing task.
 	wrong := fmt.Sprintf("%s/v1/devices/SER2/tasks/%d/revert", ts.URL, orig.ID)
-	if resp := postRevert(t, ts, wrong, tok, ""); resp.StatusCode != http.StatusNotFound {
+	if resp := postRevert(t, ts, wrong, ""); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("wrong device = %d, want 404", resp.StatusCode)
 		resp.Body.Close()
 	} else if code := errorCode(t, resp); code != "TASK_NOT_FOUND" {
 		t.Errorf("wrong device code = %q", code)
 	}
 	missing := fmt.Sprintf("%s/v1/devices/SER1/tasks/999999/revert", ts.URL)
-	if resp := postRevert(t, ts, missing, tok, ""); resp.StatusCode != http.StatusNotFound {
+	if resp := postRevert(t, ts, missing, ""); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("missing task = %d, want 404", resp.StatusCode)
 		resp.Body.Close()
 	}
 	bad := fmt.Sprintf("%s/v1/devices/SER1/tasks/x/revert", ts.URL)
-	if resp := postRevert(t, ts, bad, tok, ""); resp.StatusCode != http.StatusBadRequest {
+	if resp := postRevert(t, ts, bad, ""); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("bad task id = %d, want 400", resp.StatusCode)
 		resp.Body.Close()
 	}
@@ -168,7 +158,7 @@ func TestRevertTaskAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	pendingURL := fmt.Sprintf("%s/v1/devices/SER1/tasks/%d/revert", ts.URL, pending[0].ID)
-	if resp := postRevert(t, ts, pendingURL, tok, ""); resp.StatusCode != http.StatusConflict {
+	if resp := postRevert(t, ts, pendingURL, ""); resp.StatusCode != http.StatusConflict {
 		t.Errorf("pending set = %d, want 409", resp.StatusCode)
 		resp.Body.Close()
 	}
@@ -181,7 +171,7 @@ func TestRevertTaskAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	rebootURL := fmt.Sprintf("%s/v1/devices/SER1/tasks/%d/revert", ts.URL, reboot[0].ID)
-	if resp := postRevert(t, ts, rebootURL, tok, ""); resp.StatusCode != http.StatusConflict {
+	if resp := postRevert(t, ts, rebootURL, ""); resp.StatusCode != http.StatusConflict {
 		t.Errorf("done reboot = %d, want 409", resp.StatusCode)
 		resp.Body.Close()
 	}
@@ -196,7 +186,7 @@ func TestRevertTaskAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	emptyURL := fmt.Sprintf("%s/v1/devices/SER1/tasks/%d/revert", ts.URL, empty[0].ID)
-	if resp := postRevert(t, ts, emptyURL, tok, ""); resp.StatusCode != http.StatusConflict {
+	if resp := postRevert(t, ts, emptyURL, ""); resp.StatusCode != http.StatusConflict {
 		t.Errorf("empty prev = %d, want 409", resp.StatusCode)
 		resp.Body.Close()
 	}
@@ -204,8 +194,7 @@ func TestRevertTaskAPI(t *testing.T) {
 
 func TestRevertJobAPI(t *testing.T) {
 	st := testStore(t)
-	_, ts, svc := newTestServer(t, st, Options{RequireRevealScope: true})
-	tok := createToken(t, st, "rw", []string{"read", "write"})
+	_, ts, svc := newTestServer(t, st)
 	now := time.Now().UTC()
 	seedDevice(t, st, "00259E-HG8145V5-SER1", "SER1", now, "")
 	seedDevice(t, st, "00259E-HG8145V5-SER2", "SER2", now, "")
@@ -230,7 +219,7 @@ func TestRevertJobAPI(t *testing.T) {
 		}
 	}
 
-	resp := postRevert(t, ts, fmt.Sprintf("%s/v1/jobs/%d/revert", ts.URL, job.ID), tok, "")
+	resp := postRevert(t, ts, fmt.Sprintf("%s/v1/jobs/%d/revert", ts.URL, job.ID), "")
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("job revert = %d, want 202", resp.StatusCode)
 	}
@@ -280,7 +269,7 @@ func TestRevertJobAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp = postRevert(t, ts, fmt.Sprintf("%s/v1/jobs/%d/revert", ts.URL, noop.ID), tok, "")
+	resp = postRevert(t, ts, fmt.Sprintf("%s/v1/jobs/%d/revert", ts.URL, noop.ID), "")
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("empty job revert = %d, want 409", resp.StatusCode)
 		resp.Body.Close()
@@ -288,7 +277,7 @@ func TestRevertJobAPI(t *testing.T) {
 		t.Errorf("empty job code = %q", code)
 	}
 
-	resp = postRevert(t, ts, fmt.Sprintf("%s/v1/jobs/999999/revert", ts.URL), tok, "")
+	resp = postRevert(t, ts, fmt.Sprintf("%s/v1/jobs/999999/revert", ts.URL), "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("missing job = %d, want 404", resp.StatusCode)
 		resp.Body.Close()

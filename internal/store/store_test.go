@@ -82,7 +82,7 @@ func testStore(t *testing.T) *Store {
 	}
 	t.Cleanup(s.Close)
 	if _, err := s.pool.Exec(ctx, `TRUNCATE devices, tasks, events, jobs,
-		firmware, api_tokens RESTART IDENTITY CASCADE`); err != nil {
+		firmware RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return s

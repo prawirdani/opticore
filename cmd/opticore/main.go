@@ -56,7 +56,6 @@ const usage = `usage: opticore [-env-file path] <command> [args]
   job revert <id>                       revert every done set task of the job
   wake <serial|id>
   logs [-n N] [-f]                      tail the daemon log (OPTICORE_LOG_FILE)
-  token create <name> --scope read,write[,reveal]
   version                               print the build version
 `
 
@@ -105,8 +104,6 @@ func main() {
 		err = cmdLogs(ctx, args)
 	case "stop":
 		err = cmdStop(os.Getenv, args)
-	case "token":
-		err = cmdToken(ctx, args)
 	case "version":
 		fmt.Println(version)
 	case "-h", "--help", "help":
@@ -260,15 +257,7 @@ func serve(ctx context.Context, args []string) error {
 		IdleTimeout:       cfg.CWMPSessionTimeout,
 	}
 
-	apiSrv := api.New(st, svc, cfg.SecretKey, log, api.Options{
-		NoAuth:             !cfg.APIAuth,
-		AllowInsecureLocal: cfg.APIInsecureLocal,
-		RequireRevealScope: cfg.APIRequireReveal,
-		ListenAddr:         cfg.APIAddr,
-	})
-	if err := apiSrv.Err(); err != nil {
-		return err
-	}
+	apiSrv := api.New(st, svc, cfg.SecretKey, log)
 	apiMux := http.NewServeMux()
 	apiMux.Handle("/", apiSrv.Handler())
 	apiMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -288,14 +277,7 @@ func serve(ctx context.Context, args []string) error {
 	errc := make(chan error, 2)
 	go func() { errc <- srv.ListenAndServe() }()
 	go func() { errc <- apiHTTP.ListenAndServe() }()
-	log.Info("opticore listening", "cwmp", cfg.CWMPAddr, "api", cfg.APIAddr,
-		"api_auth", cfg.APIAuth && !cfg.APIInsecureLocal)
-	if !cfg.APIAuth {
-		log.Warn("API authentication is disabled: anyone who can reach the API listener can read devices and queue tasks",
-			"addr", cfg.APIAddr)
-	} else if cfg.APIInsecureLocal {
-		log.Warn("API authentication is disabled for loopback clients only", "addr", cfg.APIAddr)
-	}
+	log.Info("opticore listening", "cwmp", cfg.CWMPAddr, "api", cfg.APIAddr)
 
 	select {
 	case err := <-errc:
@@ -860,36 +842,6 @@ func cmdWake(ctx context.Context, args []string) error {
 			return err
 		}
 		fmt.Println("connection request accepted")
-		return nil
-	})
-}
-
-func cmdToken(ctx context.Context, args []string) error {
-	if len(args) < 2 || args[0] != "create" {
-		return errors.New("usage: token create <name> --scope read,write[,reveal]")
-	}
-	name := args[1]
-	fl, _ := split(args[2:])
-	fs := flag.NewFlagSet("token create", flag.ContinueOnError)
-	scopes := fs.String("scope", "read", "comma-separated scopes: read, write, reveal")
-	if err := fs.Parse(fl); err != nil {
-		return err
-	}
-	sc := strings.Split(*scopes, ",")
-	for i := range sc {
-		sc[i] = strings.TrimSpace(sc[i])
-		switch sc[i] {
-		case "read", "write", "reveal":
-		default:
-			return fmt.Errorf("unknown scope %q", sc[i])
-		}
-	}
-	return withStore(ctx, func(st *store.Store, _ config.Config) error {
-		tok, err := st.CreateToken(ctx, name, sc)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("token %q created with scopes %s\n%s\n(shown once)\n", name, strings.Join(sc, ","), tok)
 		return nil
 	})
 }
