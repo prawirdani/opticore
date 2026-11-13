@@ -1,16 +1,48 @@
 # Opticore
 
-A CWMP (TR-069) ACS daemon for FTTH fleets, written in Go. One binary, one
-PostgreSQL database, an HTTP API. It manages devices and runs the RPCs you ask
-for; it holds no provisioning logic of its own. Profiles, templates and
-subscriber state live in your application, which drives Opticore over HTTP or
-the inform hook.
+A minimal CWMP (TR-069) ACS daemon for FTTH fleets, written in Go. One binary,
+one PostgreSQL database, an HTTP API. It speaks the protocol, keeps the device
+state and runs the RPCs you ask for; it holds no provisioning logic of its own.
 
 - Wire behaviour, faults and session handling match GenieACS, so it can replace
   it without changing the ONT side.
 - No embedded library, no plugin system: clients are HTTP/JSON.
 - Failures are visible: every task keeps its attempts, fault code, previous
   values and result, and is streamed over SSE as it changes.
+
+## Why it exists
+
+The job of an ACS is narrow: accept an Inform, keep a session alive, exchange
+RPCs, wake devices, and remember what happened. GenieACS does that, and also
+does provisioning — presets that match devices and run JavaScript fragments, a
+MongoDB data store, its own config language. For a fleet whose subscriber
+configuration already lives in a subscriber system, that puts the same
+decisions in two places: the ACS grows rules nobody can test in isolation, and
+reading or changing a device means going through the ACS's data model instead
+of yours.
+
+Opticore splits it: the ACS is the transport and the ledger, your application
+is the brain. The ACS keeps devices, sessions, the task queue with every
+attempt, fault and previous value, wake-up and events. Your application decides
+what to configure, and says so as tasks — over HTTP, or through the inform hook
+when a device comes online.
+
+What that buys:
+
+- **No hidden writes.** Opticore writes exactly one thing on its own: its
+  connection-request credentials. Everything else is a task someone asked for.
+- **Your data, your queries.** State is plain PostgreSQL, so subscriber joins,
+  audits and reports run where the rest of your data already is.
+- **Every change is a row.** A task carries its args, its previous values, its
+  result and its fault, and can be inspected or cancelled like any other record.
+- **Boring operations.** One static binary, migrations on start, JSON logs, no
+  message broker, no external config service.
+- **Provisioning stays testable.** The hook is HTTP, so the rules can be unit
+  tested, replayed and versioned outside the ACS, in whatever language you
+  already use.
+
+It is deliberately not a device manager UI, not a template engine, not an
+inventory, and not a ZTP server. Those belong on top.
 
 ## Requirements
 
