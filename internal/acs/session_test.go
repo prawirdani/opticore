@@ -1405,3 +1405,61 @@ func TestPingArgsValidationAndDefaults(t *testing.T) {
 		t.Errorf("defaults = %+v, want count 4 timeout 1000 size 64", a)
 	}
 }
+
+// A TR-181 device roots at Device., and every path Opticore builds on its own
+// follows that root: the connection-request credential set and the automatic
+// tree read.
+func TestTR181DeviceRoot(t *testing.T) {
+	ctx := context.Background()
+	serial := "48575443BD7589AB"
+	h := newHarnessWith(t, func(f *fakeCPE) {
+		f.root = "Device."
+		f.params = map[string]string{
+			"Device.DeviceInfo.SoftwareVersion": "V5R020C10S271",
+			"Device.WiFi.SSID.1.SSID":           "HomeNet",
+			"Device.ManagementServer.Username":  "acs",
+		}
+	}, withAutoTreeRead)
+
+	h.sess.inform(serial, []string{"0 BOOTSTRAP", "1 BOOT"})
+	if n := h.sess.run(); n != 2 { // CR credentials, then the tree read
+		t.Fatalf("answered %d requests, want 2 (CR set, root GPV)", n)
+	}
+
+	h.sess.mu.Lock()
+	var crNames []string
+	for _, set := range h.sess.sets {
+		for _, v := range set {
+			if strings.Contains(v[0], ".ManagementServer.ConnectionRequest") {
+				crNames = append(crNames, v[0])
+			}
+		}
+	}
+	h.sess.mu.Unlock()
+	want := []string{
+		"Device.ManagementServer.ConnectionRequestUsername",
+		"Device.ManagementServer.ConnectionRequestPassword",
+	}
+	if len(crNames) != 2 || crNames[0] != want[0] || crNames[1] != want[1] {
+		t.Fatalf("CR set names = %v, want %v", crNames, want)
+	}
+
+	gpvs := h.sess.gpvNames()
+	if len(gpvs) != 1 || len(gpvs[0]) != 1 || gpvs[0][0] != "Device." {
+		t.Fatalf("GPVs = %v, want one Device. partial path", gpvs)
+	}
+
+	d, err := h.st.GetDevice(ctx, serial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.TreeReadAt == nil {
+		t.Error("tree_read_at not set after the root read")
+	}
+	if got := d.Params["Device.WiFi.SSID.1.SSID"].Value; got != "HomeNet" {
+		t.Errorf("cached SSID = %q, want HomeNet", got)
+	}
+	if got := d.SoftwareVersion; got != "V5R020C10S271" {
+		t.Errorf("software version = %q, want the TR-181 DeviceInfo value", got)
+	}
+}

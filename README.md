@@ -227,6 +227,12 @@ Tasks expire at `max(2 × inform interval, OPTICORE_TASK_EXPIRY)` after
 `run_at`, so a reboot scheduled for 02:00 stays valid until then, and a device
 that stays away does not accumulate a queue forever.
 
+**TR-181 is accepted as it comes.** The data-model root is whatever the Inform
+reports first — `InternetGatewayDevice.` for TR-098, `Device.` for TR-181 — and
+the connection-request paths, the ping object and the automatic tree read all
+follow it. A device that exposes both trees gets the one it reported first; that
+is the only TR-181 case not covered, and nothing in the fleet has it.
+
 **Summon is wake plus get.** GenieACS's Summon button is a connection request
 followed by a whole-tree refresh; Opticore has the same two halves and no
 separate command. `opticore task <serial> get` with no paths queues that
