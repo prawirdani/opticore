@@ -25,6 +25,10 @@ type Deps struct {
 	Events  EventReader
 	Params  ParamReader
 	Wake    func(ctx context.Context, idOrSerial string) error
+	// Enqueue validates and stores tasks, normally acs.Service.Enqueue, which
+	// also wakes the device when the task is due now. The console never writes
+	// a task row itself.
+	Enqueue func(ctx context.Context, idOrSerial string, tasks []store.NewTask) ([]store.Task, error)
 }
 
 // DeviceReader lists devices newest-inform first and reads one by id or

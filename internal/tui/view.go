@@ -9,10 +9,13 @@ func (m model) View() string {
 	if m.w <= 0 || m.h <= 0 {
 		return ""
 	}
-	if m.h < 5 {
-		return clip(m.statusLine(), m.w)
+	status := m.statusLines()
+	if m.h <= 3+len(status) {
+		return strings.Join(status, "\n")
 	}
-	bodyH := m.h - 4
+	// A confirmation takes as many rows as its consequence needs, so the frame
+	// shrinks the body instead of clipping the sentence.
+	bodyH := m.h - 3 - len(status)
 	lines := make([]string, 0, m.h)
 	lines = append(lines, m.tabLine(), m.contextLine())
 	body := m.body(bodyH)
@@ -20,10 +23,11 @@ func (m model) View() string {
 		body = body[:bodyH]
 	}
 	lines = append(lines, body...)
-	for len(lines) < m.h-2 {
+	for len(lines) < m.h-1-len(status) {
 		lines = append(lines, "")
 	}
-	lines = append(lines, m.statusLine(), m.helpLine())
+	lines = append(lines, status...)
+	lines = append(lines, m.helpLine())
 	// One last guard: nothing may wrap into soup, whatever the terminal size.
 	for i, ln := range lines {
 		lines[i] = clip(ln, m.w)
@@ -113,23 +117,32 @@ func (m model) contextLine() string {
 	return clip(stMuted.Render(s), m.w)
 }
 
-func (m model) statusLine() string {
-	switch {
-	case m.confirm != nil:
-		return clip(stAccent.Render(fmt.Sprintf("Wake %s now?  [y] yes  [n] no", m.confirm.label)), m.w)
-	case m.loading != "":
-		return clip(stMuted.Render("· "+m.loading), m.w)
-	case m.statusBad:
-		return clip(stBad.Render(m.status), m.w)
+// statusLines is the bottom status area: a pending confirmation owns it until
+// y or n, otherwise it is the last message or the loading line. The confirm
+// prompt wraps, because the consequence of a factory reset does not fit one
+// line at 80 columns and must not be cut off.
+func (m model) statusLines() []string {
+	if m.confirm != nil {
+		out := []string{clip(stAccent.Render(m.confirm.prompt), m.w)}
+		for _, line := range wrapWords(m.confirm.detail+"  [y] yes  [n] no", m.w) {
+			out = append(out, clip(line, m.w))
+		}
+		return out
 	}
-	return clip(stMuted.Render(m.status), m.w)
+	switch {
+	case m.loading != "":
+		return []string{clip(stMuted.Render("· "+m.loading), m.w)}
+	case m.statusBad:
+		return []string{clip(stBad.Render(m.status), m.w)}
+	}
+	return []string{clip(stMuted.Render(m.status), m.w)}
 }
 
 func (m model) helpLine() string {
 	var s string
 	switch m.screen {
 	case scrDevice:
-		s = "↑↓ move  ·  enter expand  ·  esc collapse/back  ·  w wake  ·  r refresh  ·  q quit"
+		s = "↑↓ move  ·  enter expand  ·  esc back  ·  w wake  ·  b reboot  ·  x reset  ·  r refresh  ·  q quit"
 	case scrTasks:
 		s = "↑↓ move  ·  s status  ·  / filter  ·  esc back  ·  r refresh  ·  1/2/3 screens  ·  q quit"
 	case scrJobs:

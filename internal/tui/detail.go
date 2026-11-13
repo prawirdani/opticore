@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/prawirdani/opticore/internal/store"
 )
 
@@ -208,6 +210,8 @@ func (m model) detailBody(h int) []string {
 		return []string{stMuted.Render(" no device loaded")}
 	}
 	out := append([]string{}, m.detailFacts()...)
+	out = append(out, "", stHead.Render("ACTIONS"))
+	out = append(out, m.actionLines()...)
 	out = append(out, "")
 
 	tail := append(m.detailTasks(), m.detailEvents()...)
@@ -276,6 +280,29 @@ func (m model) factRows() [][2]string {
 // never collides with its neighbour and every value starts at one x.
 func (m model) detailFacts() []string {
 	return labelTable(m.factRows(), m.w)
+}
+
+// actionLines is the ACTIONS block: the key, the verb, and what it does. The
+// keys are the ones key() accepts on this screen.
+func (m model) actionLines() []string {
+	specs := []struct{ key, name, what string }{
+		{"w", "wake", "send a connection request now"},
+		{"b", "reboot", "queue a reboot task"},
+		{"x", "factory reset", "queue a reset; wipes the device configuration"},
+	}
+	nameWidth := 0
+	for _, s := range specs {
+		if n := lipgloss.Width(s.name); n > nameWidth {
+			nameWidth = n
+		}
+	}
+	nameWidth += 2 // two cells between the verb and its description
+	out := make([]string, 0, len(specs))
+	for _, s := range specs {
+		line := "  " + stAccent.Render(s.key) + "  " + cell(s.name, nameWidth) + stMuted.Render(s.what)
+		out = append(out, clip(line, m.w))
+	}
+	return out
 }
 
 func kv(k, v string) string {

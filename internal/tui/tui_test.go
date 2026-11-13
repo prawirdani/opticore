@@ -32,10 +32,14 @@ type fake struct {
 	jobErr   error
 	wakeErr  error
 	woken    []string
+
+	queued     []store.Task
+	enqueueErr error
+	nextID     int64
 }
 
 func (f *fake) deps() Deps {
-	return Deps{Devices: f, Tasks: f, Jobs: f, Events: f, Params: f, Wake: f.wake}
+	return Deps{Devices: f, Tasks: f, Jobs: f, Events: f, Params: f, Wake: f.wake, Enqueue: f.enqueue}
 }
 
 func (f *fake) ListDevices(ctx context.Context, flt store.ListFilter) ([]store.Device, error) {
@@ -118,6 +122,24 @@ func (f *fake) JobFailures(ctx context.Context, id int64) ([]store.JobFailure, e
 func (f *fake) wake(ctx context.Context, idOrSerial string) error {
 	f.woken = append(f.woken, idOrSerial)
 	return f.wakeErr
+}
+
+func (f *fake) enqueue(ctx context.Context, idOrSerial string, tasks []store.NewTask) ([]store.Task, error) {
+	if f.enqueueErr != nil {
+		return nil, f.enqueueErr
+	}
+	out := make([]store.Task, 0, len(tasks))
+	for _, t := range tasks {
+		f.nextID++
+		if f.nextID < 31 {
+			f.nextID = 31
+		}
+		task := store.Task{ID: f.nextID, DeviceID: idOrSerial, Name: t.Name, Status: "pending", UpdatedAt: testNow}
+		f.queued = append(f.queued, task)
+		f.tasks = append(f.tasks, task) // the detail's TASKS block must see it
+		out = append(out, task)
+	}
+	return out, nil
 }
 
 func newTestModel(f *fake) model {
@@ -286,12 +308,12 @@ func TestWakeErrorBecomesStatusLine(t *testing.T) {
 	if m.confirm == nil {
 		t.Fatal("w did not ask for confirmation")
 	}
-	if !strings.Contains(m.View(), "Wake ONT0001 now?") {
+	if !strings.Contains(m.View(), "Wake ONT0001 — HG8145V5?") {
 		t.Fatalf("confirmation prompt missing:\n%s", m.View())
 	}
 
 	m = press(t, m, typed("n"))
-	if m.confirm != nil || len(f.woken) != 0 || m.status != "wake cancelled" {
+	if m.confirm != nil || len(f.woken) != 0 || m.status != "cancelled" {
 		t.Fatalf("n did not cancel: confirm=%v woke=%v status=%q", m.confirm, f.woken, m.status)
 	}
 
@@ -599,4 +621,141 @@ func stripANSI(s string) string {
 		i++
 	}
 	return b.String()
+}
+
+func TestDetailRebootQueuesTask(t *testing.T) {
+	f := &fake{devices: nDevices(1)}
+	m := boot(t, f)
+	if strings.Contains(m.View(), "ACTIONS") {
+		t.Fatal("ACTIONS must not appear on the list screen")
+	}
+
+	m = press(t, m, keyEnter)
+	if m.screen != scrDevice {
+		t.Fatalf("enter did not open the device: %v", m.screen)
+	}
+	if !strings.Contains(m.View(), "ACTIONS") || !strings.Contains(m.View(), "factory reset") {
+		t.Fatalf("detail screen has no ACTIONS block:\n%s", m.View())
+	}
+
+	m = press(t, m, typed("b"))
+	if m.confirm == nil {
+		t.Fatal("b did not ask for confirmation")
+	}
+	if m.confirm.prompt != "Reboot ONT0001 — HG8145V5?" {
+		t.Fatalf("reboot prompt: %q", m.confirm.prompt)
+	}
+	if !strings.Contains(m.confirm.detail, "restarts on its next session") {
+		t.Fatalf("reboot consequence: %q", m.confirm.detail)
+	}
+
+	m = press(t, m, typed("y"))
+	if len(f.queued) != 1 {
+		t.Fatalf("queued %d tasks, want 1: %+v", len(f.queued), f.queued)
+	}
+	if f.queued[0].Name != "reboot" || f.queued[0].DeviceID != device(1).ID {
+		t.Fatalf("queued task: %+v", f.queued[0])
+	}
+	if m.status != "queued reboot #31 — device woken" || m.statusBad {
+		t.Fatalf("status: bad=%v %q", m.statusBad, m.status)
+	}
+	if !strings.Contains(m.View(), "#31 reboot") {
+		t.Fatalf("TASKS block was not refreshed:\n%s", m.View())
+	}
+	if len(f.woken) != 0 {
+		t.Fatalf("the console must not wake a task action itself: %v", f.woken)
+	}
+}
+
+func TestDetailFactoryResetIsDestructiveAndConfirmed(t *testing.T) {
+	f := &fake{devices: nDevices(1)}
+	m := boot(t, f)
+	m = press(t, m, keyEnter)
+
+	m = press(t, m, typed("x"))
+	if m.confirm == nil || m.confirm.prompt != "Factory reset ONT0001 — HG8145V5?" {
+		t.Fatalf("reset prompt: %+v", m.confirm)
+	}
+	if !strings.Contains(m.confirm.detail, "Destructive") ||
+		!strings.Contains(m.confirm.detail, "wipes the device configuration") ||
+		!strings.Contains(m.confirm.detail, "connection-request credentials") {
+		t.Fatalf("reset consequence: %q", m.confirm.detail)
+	}
+	if !strings.Contains(m.View(), "wipes the device configuration") {
+		t.Fatalf("consequence is not rendered:\n%s", m.View())
+	}
+
+	m = press(t, m, typed("n"))
+	if len(f.queued) != 0 {
+		t.Fatalf("n queued %+v", f.queued)
+	}
+
+	m = press(t, m, typed("x"))
+	m = press(t, m, typed("y"))
+	if len(f.queued) != 1 || f.queued[0].Name != "reset" {
+		t.Fatalf("queued: %+v", f.queued)
+	}
+	if m.status != "queued factory reset #31 — device woken" {
+		t.Fatalf("status: %q", m.status)
+	}
+}
+
+func TestConfirmBlocksOtherKeys(t *testing.T) {
+	f := &fake{devices: nDevices(1)}
+	m := boot(t, f)
+	m = press(t, m, keyEnter)
+	m = press(t, m, typed("b"))
+	if m.confirm == nil {
+		t.Fatal("no confirmation to test")
+	}
+
+	for _, k := range []tea.KeyMsg{typed("b"), typed("x"), typed("w")} {
+		m = press(t, m, k)
+	}
+	m = press(t, m, keyDown)
+	m = press(t, m, keyEnter)
+	m = press(t, m, typed("r"))
+	if m.confirm == nil {
+		t.Fatal("a non-y/n key closed the confirmation")
+	}
+	if len(f.queued) != 0 || len(f.woken) != 0 {
+		t.Fatalf("keys inside the confirmation acted: queued=%+v woken=%v", f.queued, f.woken)
+	}
+
+	m = press(t, m, keyEsc)
+	if m.confirm != nil || len(f.queued) != 0 || m.status != "cancelled" {
+		t.Fatalf("esc did not cancel cleanly: confirm=%v queued=%+v status=%q", m.confirm, f.queued, m.status)
+	}
+}
+
+func TestEnqueueErrorIsStatusLine(t *testing.T) {
+	f := &fake{devices: nDevices(1), enqueueErr: errors.New("task rejected")}
+	m := boot(t, f)
+	m = press(t, m, keyEnter)
+	m = press(t, m, typed("b"))
+	m = press(t, m, typed("y"))
+
+	if !m.statusBad || !strings.Contains(m.status, "task rejected") {
+		t.Fatalf("status: bad=%v %q", m.statusBad, m.status)
+	}
+	if m.screen != scrDevice || m.View() == "" {
+		t.Fatalf("enqueue error lost the screen: %v", m.screen)
+	}
+	if len(f.queued) != 0 {
+		t.Fatalf("a failed enqueue recorded tasks: %+v", f.queued)
+	}
+}
+
+func TestListWakeStillCallsWakeOnly(t *testing.T) {
+	f := &fake{devices: nDevices(1)}
+	m := boot(t, f)
+	m = press(t, m, typed("w"))
+	m = press(t, m, typed("y"))
+
+	if len(f.woken) != 1 || f.woken[0] != device(1).ID {
+		t.Fatalf("wake calls: %v", f.woken)
+	}
+	if len(f.queued) != 0 {
+		t.Fatalf("the list's w queued tasks: %+v", f.queued)
+	}
 }

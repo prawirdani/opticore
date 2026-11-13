@@ -206,6 +206,31 @@ func tableHeader(cols []column, widths []int) string {
 	return stHead.Render(tableRow(cells, widths))
 }
 
+// wrapWords breaks text on spaces to fit w cells. A word wider than w is
+// clipped, never broken mid-word, so a URL stays readable.
+func wrapWords(s string, w int) []string {
+	if w <= 0 {
+		return nil
+	}
+	var out []string
+	line := ""
+	for _, word := range strings.Fields(s) {
+		switch {
+		case line == "":
+			line = word
+		case lipgloss.Width(line)+1+lipgloss.Width(word) <= w:
+			line += " " + word
+		default:
+			out = append(out, clip(line, w))
+			line = word
+		}
+	}
+	if line != "" {
+		out = append(out, clip(line, w))
+	}
+	return out
+}
+
 // labelTable lays pairs out as an aligned two-column table: the label column
 // is sized from the longest label, the value column takes the rest, and a
 // value that does not fit is clipped with an ellipsis, never wrapped.

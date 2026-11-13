@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -28,10 +30,23 @@ const (
 	detailTaskN = 20
 )
 
-// confirmState is a pending "are you sure" for the one write the console has.
+// actionKind is the three device actions the daemon supports.
+type actionKind int
+
+const (
+	actWake actionKind = iota
+	actReboot
+	actReset
+)
+
+// confirmState is a pending "are you sure" for a write. open blocks every
+// other key until y or n, so a held key cannot queue twice.
 type confirmState struct {
-	id    string
-	label string
+	kind   actionKind
+	id     string
+	label  string // serial — product class
+	prompt string // "Reboot ONT0001 — HG8145V5?"
+	detail string // what the action does, keys included by the renderer
 }
 
 type model struct {
@@ -156,6 +171,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status, m.statusBad = "wake sent to "+msg.label, false
 		}
 		return m, nil
+	case enqueueMsg:
+		if msg.err != nil {
+			m.status, m.statusBad = "ERR: queue "+msg.verb+" for "+msg.label+": "+msg.err.Error(), true
+			return m, nil
+		}
+		m.status, m.statusBad = queuedStatus(msg.verb, msg.tasks), false
+		if msg.device != m.det.device.ID {
+			return m, nil
+		}
+		return m, loadDetailTasks(m.ctx, m.deps.Tasks, msg.device)
+	case detailTasksMsg:
+		if msg.device != m.det.device.ID {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.statusBad = true
+			m.status += " (tasks not refreshed: " + msg.err.Error() + ")"
+			return m, nil
+		}
+		m.det.tasks = msg.rows
+		return m, nil
 	}
 	return m, nil
 }
@@ -206,7 +242,13 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "w":
-		m.beginWake()
+		m.beginAction(actWake)
+		return m, nil
+	case "b":
+		m.beginAction(actReboot)
+		return m, nil
+	case "x":
+		m.beginAction(actReset)
 		return m, nil
 	case "up", "k":
 		m.moveCursor(-1)
@@ -228,23 +270,28 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// confirmKey is modal: only y and n (plus Esc for n) do anything, so a held
+// key cannot queue the same task twice.
 func (m model) confirmKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	c := m.confirm
 	switch k.String() {
-	case "y", "Y", "enter":
+	case "y", "Y":
 		m.confirm = nil
-		wake := m.deps.Wake
-		if wake == nil {
-			m.say("wake is not configured")
-			return m, nil
+		if c.kind == actWake {
+			wake := m.deps.Wake
+			if wake == nil {
+				m.say("wake is not configured")
+				return m, nil
+			}
+			ctx := m.ctx
+			return m, func() tea.Msg {
+				return wakeMsg{id: c.id, label: c.label, err: wake(ctx, c.id)}
+			}
 		}
-		ctx := m.ctx
-		return m, func() tea.Msg {
-			return wakeMsg{id: c.id, label: c.label, err: wake(ctx, c.id)}
-		}
-	case "n", "N", "esc", "q":
+		return m, m.queue(c)
+	case "n", "N", "esc":
 		m.confirm = nil
-		m.say("wake cancelled")
+		m.say("cancelled")
 	}
 	return m, nil
 }
@@ -456,25 +503,90 @@ func (m *model) detailToggle() tea.Cmd {
 	return loadParams(m.ctx, m.deps.Params, m.det.device.ID, row.prefix)
 }
 
-func (m *model) beginWake() {
-	var id, label string
+// beginAction opens the confirmation for one device action. Wake works from
+// the list too; reboot and reset only exist on the detail screen.
+func (m *model) beginAction(kind actionKind) {
+	var d store.Device
 	switch m.screen {
 	case scrDevice:
-		id, label = m.det.device.ID, m.det.device.Serial
+		d = m.det.device
 	case scrDevices:
-		if d, ok := m.dev.selected(); ok {
-			id, label = d.ID, d.Serial
+		if kind != actWake {
+			return
 		}
+		selected, ok := m.dev.selected()
+		if !ok {
+			m.say("no device selected")
+			return
+		}
+		d = selected
+	default:
+		return
 	}
-	if id == "" {
+	if d.ID == "" {
 		m.say("no device selected")
 		return
 	}
-	if m.deps.Wake == nil {
-		m.say("wake is not configured")
-		return
+	label := d.Serial
+	if d.ProductClass != "" {
+		label += " — " + d.ProductClass
 	}
-	m.confirm = &confirmState{id: id, label: label}
+	c := &confirmState{kind: kind, id: d.ID, label: label}
+	switch kind {
+	case actWake:
+		if m.deps.Wake == nil {
+			m.say("wake is not configured")
+			return
+		}
+		c.prompt = "Wake " + label + "?"
+		c.detail = "Sends a connection request now; the device starts a session if it is reachable."
+	case actReboot:
+		if m.deps.Enqueue == nil {
+			m.say("queueing tasks is not configured")
+			return
+		}
+		c.prompt = "Reboot " + label + "?"
+		c.detail = "Queues a reboot task and wakes the device; it restarts on its next session."
+	case actReset:
+		if m.deps.Enqueue == nil {
+			m.say("queueing tasks is not configured")
+			return
+		}
+		c.prompt = "Factory reset " + label + "?"
+		c.detail = "Destructive: wipes the device configuration and its connection-request credentials. The device re-registers when it next informs."
+	}
+	m.confirm = c
+}
+
+// queue sends one task through Enqueue, which validates it and wakes the
+// device when it is due now.
+func (m *model) queue(c *confirmState) tea.Cmd {
+	enqueue := m.deps.Enqueue
+	if enqueue == nil {
+		m.say("queueing tasks is not configured")
+		return nil
+	}
+	name, verb := "reboot", "reboot"
+	if c.kind == actReset {
+		name, verb = "reset", "factory reset"
+	}
+	ctx, id, label := m.ctx, c.id, c.label
+	return func() tea.Msg {
+		tasks, err := enqueue(ctx, id, []store.NewTask{{Name: name}})
+		return enqueueMsg{device: id, label: label, verb: verb, tasks: tasks, err: err}
+	}
+}
+
+// queuedStatus echoes the task ids the service returned.
+func queuedStatus(verb string, tasks []store.Task) string {
+	ids := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		ids = append(ids, "#"+strconv.FormatInt(t.ID, 10))
+	}
+	if len(ids) == 0 {
+		return "queued " + verb + " — device woken"
+	}
+	return "queued " + verb + " " + strings.Join(ids, ", ") + " — device woken"
 }
 
 // back implements Esc: collapse a level, then leave the drill-in screen, then
@@ -548,6 +660,20 @@ type wakeMsg struct {
 	err   error
 }
 
+type enqueueMsg struct {
+	device string
+	label  string
+	verb   string
+	tasks  []store.Task
+	err    error
+}
+
+type detailTasksMsg struct {
+	device string
+	rows   []store.Task
+	err    error
+}
+
 func loadDevices(ctx context.Context, r DeviceReader) tea.Cmd {
 	return func() tea.Msg {
 		rows, err := r.ListDevices(ctx, store.ListFilter{Limit: deviceLimit})
@@ -588,6 +714,14 @@ func loadDetail(ctx context.Context, d Deps, id string) tea.Cmd {
 			msg.events = events
 		}
 		return msg
+	}
+}
+
+// loadDetailTasks refreshes only the detail screen's task block after a queue.
+func loadDetailTasks(ctx context.Context, r TaskReader, id string) tea.Cmd {
+	return func() tea.Msg {
+		rows, err := r.ListTasksFiltered(ctx, id, "", detailTaskN)
+		return detailTasksMsg{device: id, rows: rows, err: err}
 	}
 }
 

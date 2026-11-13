@@ -319,8 +319,9 @@ func cmdTUI(ctx context.Context) error {
 		svc := &acs.Service{Store: st, Key: cfg.SecretKey, Waker: wake.New(cfg.CWMPCRTimeout, log), Logger: log}
 		return tui.Run(ctx, tui.Deps{
 			Devices: st, Tasks: st, Jobs: st, Events: st,
-			Params: tuiParams{st: st},
-			Wake:   svc.Wake,
+			Params:  tuiParams{st: st},
+			Wake:    svc.Wake,
+			Enqueue: svc.Enqueue,
 		})
 	})
 }
