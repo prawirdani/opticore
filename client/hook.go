@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -36,26 +35,20 @@ type Result struct {
 	Fault     string          `json:"fault,omitempty"`
 }
 
-// HookHandler is the provisioner side. It verifies the bearer secret and calls
-// fn. Return an error to send 500, which Opticore treats as "hook failed,
-// session continues".
-func HookHandler(secret string, fn func(context.Context, Step) ([]Task, error)) http.Handler {
-	return HandlerFunc(secret, func(ctx context.Context, s Step) (Reply, error) {
+// HookHandler is the provisioner side. It calls fn. Return an error to send
+// 500, which Opticore treats as "hook failed, session continues".
+func HookHandler(fn func(context.Context, Step) ([]Task, error)) http.Handler {
+	return HandlerFunc(func(ctx context.Context, s Step) (Reply, error) {
 		tasks, err := fn(ctx, s)
 		return Reply{Tasks: tasks}, err
 	})
 }
 
 // HandlerFunc is HookHandler with access to the opaque state field.
-func HandlerFunc(secret string, fn func(context.Context, Step) (Reply, error)) http.Handler {
-	want := "Bearer " + secret
+func HandlerFunc(fn func(context.Context, Step) (Reply, error)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte(want)) != 1 {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		var s Step

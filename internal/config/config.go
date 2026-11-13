@@ -31,7 +31,6 @@ type Config struct {
 	APIAddr string
 
 	HookURL         string
-	HookSecret      string
 	HookEvents      []string
 	HookPrefetch    []string
 	HookStepTimeout time.Duration
@@ -187,7 +186,6 @@ func Load(getenv func(string) string) (Config, error) {
 		CWMPAuthPassword:   l.str("CWMP_AUTH_PASSWORD", ""),
 		APIAddr:            l.addr("OPTICORE_API_ADDR", ":8081"),
 		HookURL:            l.str("OPTICORE_HOOK_URL", ""),
-		HookSecret:         l.str("OPTICORE_HOOK_SECRET", ""),
 		HookEvents:         l.list("OPTICORE_HOOK_EVENTS", "0 BOOTSTRAP"),
 		HookPrefetch:       l.list("OPTICORE_HOOK_PREFETCH", ""),
 		HookStepTimeout:    l.dur("OPTICORE_HOOK_STEP_TIMEOUT", 2*time.Second),
@@ -208,9 +206,6 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 
 	if cfg.HookURL != "" {
-		if cfg.HookSecret == "" {
-			l.fail("OPTICORE_HOOK_SECRET is required when OPTICORE_HOOK_URL is set")
-		}
 		if !strings.HasPrefix(cfg.HookURL, "http://") &&
 			!strings.HasPrefix(cfg.HookURL, "https://") &&
 			!strings.HasPrefix(cfg.HookURL, "unix:") {

@@ -11,9 +11,13 @@ import (
 	"testing"
 )
 
-func TestHookHandlerAuthAndReply(t *testing.T) {
+// The handler has no auth: a request with no Authorization header is served,
+// and a bogus header is ignored rather than rejected.
+func TestHookHandlerReplyAndNoAuth(t *testing.T) {
 	var got Step
-	h := HookHandler("s3cret", func(_ context.Context, s Step) ([]Task, error) {
+	var calls int
+	h := HookHandler(func(_ context.Context, s Step) ([]Task, error) {
+		calls++
 		got = s
 		return []Task{Set(Value{Path: "A", Value: "b"})}, nil
 	})
@@ -24,20 +28,27 @@ func TestHookHandlerAuthAndReply(t *testing.T) {
 		Step: 1, Device: Device{ID: "d", Serial: "s"},
 		Events: []string{"0 BOOTSTRAP"}, Params: map[string]Param{"a": {Value: "v"}},
 	})
-	req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer s3cret")
-	resp, err := srv.Client().Do(req)
-	if err != nil {
-		t.Fatal(err)
+	post := func(header, value string) *http.Response {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(body))
+		if header != "" {
+			req.Header.Set(header, value)
+		}
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
 	}
-	defer resp.Body.Close()
+
+	resp := post("", "")
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
+		t.Fatalf("no header status = %d", resp.StatusCode)
 	}
 	var reply Reply
 	if err := json.NewDecoder(resp.Body).Decode(&reply); err != nil {
 		t.Fatal(err)
 	}
+	resp.Body.Close()
 	if len(reply.Tasks) != 1 || reply.Tasks[0].Name != "set" {
 		t.Fatalf("reply = %+v", reply)
 	}
@@ -45,20 +56,22 @@ func TestHookHandlerAuthAndReply(t *testing.T) {
 		t.Errorf("handler saw %+v", got)
 	}
 
-	unauthorized, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(body))
-	unauthorized.Header.Set("Authorization", "Bearer wrong")
-	resp, err = srv.Client().Do(unauthorized)
-	if err != nil {
-		t.Fatal(err)
+	resp = post("Authorization", "Bearer wrong")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("bogus Authorization = %d, want 200", resp.StatusCode)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("wrong secret = %d, want 401", resp.StatusCode)
+	resp = post("Authorization", "Basic bm90LWEtYmVhcmVy")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("non-bearer Authorization = %d, want 200", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if calls != 3 {
+		t.Errorf("handler called %d times, want 3", calls)
 	}
 
 	get, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
-	get.Header.Set("Authorization", "Bearer s3cret")
-	resp, err = srv.Client().Do(get)
+	resp, err := srv.Client().Do(get)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +81,6 @@ func TestHookHandlerAuthAndReply(t *testing.T) {
 	}
 
 	bad, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader("not json"))
-	bad.Header.Set("Authorization", "Bearer s3cret")
 	resp, err = srv.Client().Do(bad)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +92,7 @@ func TestHookHandlerAuthAndReply(t *testing.T) {
 }
 
 func TestHookHandlerFuncState(t *testing.T) {
-	h := HandlerFunc("k", func(_ context.Context, s Step) (Reply, error) {
+	h := HandlerFunc(func(_ context.Context, s Step) (Reply, error) {
 		return Reply{Tasks: []Task{Reboot()}, State: "next:" + s.State}, nil
 	})
 	srv := httptest.NewServer(h)
@@ -88,7 +100,6 @@ func TestHookHandlerFuncState(t *testing.T) {
 
 	body, _ := json.Marshal(Step{Step: 2, State: "x"})
 	req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer k")
 	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +112,25 @@ func TestHookHandlerFuncState(t *testing.T) {
 	}
 	if reply.State != "next:x" || len(reply.Tasks) != 1 {
 		t.Errorf("reply = %+v", reply)
+	}
+}
+
+// A handler error is a 500, which Opticore reads as "hook failed, session
+// continues".
+func TestHookHandlerErrorIs500(t *testing.T) {
+	srv := httptest.NewServer(HookHandler(func(context.Context, Step) ([]Task, error) {
+		return nil, io.ErrUnexpectedEOF
+	}))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader(`{"step":1}`))
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
 	}
 }
 

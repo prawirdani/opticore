@@ -7,16 +7,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/prawirdani/opticore/client"
 )
 
-func TestHandlerAuthAndSteps(t *testing.T) {
+// The hook POST carries no credentials and no Authorization header.
+func TestStepsAndHeaders(t *testing.T) {
 	var got Step
-	h := client.HookHandler("s3cret", func(_ context.Context, s Step) ([]Task, error) {
+	h := client.HookHandler(func(_ context.Context, s Step) ([]Task, error) {
 		got = s
 		if s.Step == 1 {
 			return []Task{{Name: "set", Args: json.RawMessage(`{"values":[["A","b"]]}`)}}, nil
@@ -26,7 +26,7 @@ func TestHandlerAuthAndSteps(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	c, err := New(srv.URL, "s3cret", time.Second)
+	c, err := New(srv.URL, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,10 +43,24 @@ func TestHandlerAuthAndSteps(t *testing.T) {
 		t.Errorf("handler saw %+v", got)
 	}
 
-	// Wrong secret is rejected.
-	bad, _ := New(srv.URL, "wrong", time.Second)
-	if _, err := bad.Step(context.Background(), in); err == nil || !strings.Contains(err.Error(), "401") {
-		t.Fatalf("err = %v, want 401", err)
+	var hdr http.Header
+	raw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hdr = r.Header.Clone()
+		w.Write([]byte(`{"tasks":[{"name":"reboot"}]}`))
+	}))
+	defer raw.Close()
+	c2, err := New(raw.URL, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c2.Step(context.Background(), Step{}); err != nil {
+		t.Fatal(err)
+	}
+	if v := hdr.Get("Authorization"); v != "" {
+		t.Errorf("hook POST sent Authorization %q, want none", v)
+	}
+	if v := hdr.Get("Content-Type"); v != "application/json" {
+		t.Errorf("hook POST Content-Type = %q", v)
 	}
 }
 
@@ -55,7 +69,7 @@ func TestStepTimeoutAndBadReply(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 	}))
 	defer slow.Close()
-	c, _ := New(slow.URL, "s", 30*time.Millisecond)
+	c, _ := New(slow.URL, 30*time.Millisecond)
 	if _, err := c.Step(context.Background(), Step{}); err == nil {
 		t.Fatal("timeout not reported")
 	}
@@ -64,9 +78,18 @@ func TestStepTimeoutAndBadReply(t *testing.T) {
 		w.Write([]byte("not json"))
 	}))
 	defer bad.Close()
-	c2, _ := New(bad.URL, "s", time.Second)
+	c2, _ := New(bad.URL, time.Second)
 	if _, err := c2.Step(context.Background(), Step{}); err == nil {
 		t.Fatal("bad reply accepted")
+	}
+
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer failing.Close()
+	c3, _ := New(failing.URL, time.Second)
+	if _, err := c3.Step(context.Background(), Step{}); err == nil {
+		t.Fatal("non-2xx accepted")
 	}
 }
 
@@ -77,13 +100,13 @@ func TestUnixSocket(t *testing.T) {
 	if err != nil {
 		t.Skipf("unix socket unsupported here: %v", err)
 	}
-	srv := &http.Server{Handler: client.HookHandler("s", func(context.Context, Step) ([]Task, error) {
+	srv := &http.Server{Handler: client.HookHandler(func(context.Context, Step) ([]Task, error) {
 		return []Task{{Name: "reboot"}}, nil
 	})}
 	go srv.Serve(ln)
 	defer srv.Close()
 
-	c, err := New("unix:"+sock, "s", time.Second)
+	c, err := New("unix:"+sock, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,14 +120,18 @@ func TestUnixSocket(t *testing.T) {
 }
 
 func TestNewValidation(t *testing.T) {
-	for _, tc := range []struct{ url, secret string }{
-		{"", "s"},
-		{"http://x", ""},
-		{"ftp://x", "s"},
-		{"unix:", "s"},
+	for _, url := range []string{
+		"",
+		"ftp://x",
+		"unix:",
 	} {
-		if _, err := New(tc.url, tc.secret, time.Second); err == nil {
-			t.Errorf("New(%q,%q) accepted", tc.url, tc.secret)
+		if _, err := New(url, time.Second); err == nil {
+			t.Errorf("New(%q) accepted", url)
+		}
+	}
+	for _, url := range []string{"http://x", "https://x", "unix:/run/h.sock"} {
+		if _, err := New(url, time.Second); err != nil {
+			t.Errorf("New(%q): %v", url, err)
 		}
 	}
 }

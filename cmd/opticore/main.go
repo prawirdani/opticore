@@ -178,7 +178,7 @@ func serve(ctx context.Context) error {
 		HookEvents: cfg.HookEvents, HookPrefetch: cfg.HookPrefetch, HookTimeout: cfg.HookTimeout,
 	}
 	if cfg.HookURL != "" {
-		hc, err := hook.New(cfg.HookURL, cfg.HookSecret, cfg.HookStepTimeout)
+		hc, err := hook.New(cfg.HookURL, cfg.HookStepTimeout)
 		if err != nil {
 			return err
 		}

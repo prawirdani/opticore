@@ -32,24 +32,20 @@ type (
 
 // Client calls one provisioner endpoint.
 type Client struct {
-	url    string
-	secret string
-	step   time.Duration
-	hc     *http.Client
+	url  string
+	step time.Duration
+	hc   *http.Client
 }
 
 // New builds a client. u is http://, https:// or unix:/path/to.sock.
-func New(u, secret string, stepTimeout time.Duration) (*Client, error) {
+func New(u string, stepTimeout time.Duration) (*Client, error) {
 	if u == "" {
 		return nil, errors.New("hook: no URL")
-	}
-	if secret == "" {
-		return nil, errors.New("hook: no secret")
 	}
 	if stepTimeout <= 0 {
 		stepTimeout = 2 * time.Second
 	}
-	c := &Client{url: u, secret: secret, step: stepTimeout}
+	c := &Client{url: u, step: stepTimeout}
 	switch {
 	case strings.HasPrefix(u, "unix:"):
 		path := strings.TrimPrefix(u, "unix:")
@@ -90,7 +86,6 @@ func (c *Client) Step(ctx context.Context, s Step) (Reply, error) {
 		return Reply{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.secret)
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		return Reply{}, err

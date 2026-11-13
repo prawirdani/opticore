@@ -183,7 +183,6 @@ unit, a container, or a one-off `FOO=1 opticore serve` behaves as written.
 | Variable | Default | Meaning |
 |---|---|---|
 | `OPTICORE_HOOK_URL` | off | `http://`, `https://` or `unix:/path/to.sock` |
-| `OPTICORE_HOOK_SECRET` | — | required when the URL is set; sent as a bearer token |
 | `OPTICORE_HOOK_EVENTS` | `0 BOOTSTRAP` | event codes that trigger the hook; a prefix matches |
 | `OPTICORE_HOOK_PREFETCH` | — | parameter paths read before step 1 |
 | `OPTICORE_HOOK_STEP_TIMEOUT` | `2s` | one provisioner call |
@@ -451,7 +450,7 @@ The daemon POSTs a step to your provisioner during a live session; the SDK
 serves it and gives you typed tasks back:
 
 ```go
-http.Handle("/hook", client.HookHandler(secret, func(ctx context.Context, s client.Step) ([]client.Task, error) {
+http.Handle("/hook", client.HookHandler(func(ctx context.Context, s client.Step) ([]client.Task, error) {
 	if !client.Matches(s.Events, []string{"0 BOOTSTRAP", "1 BOOT"}) || s.Step > 1 {
 		return nil, nil // an empty reply ends the hook
 	}
@@ -459,9 +458,11 @@ http.Handle("/hook", client.HookHandler(secret, func(ctx context.Context, s clie
 }))
 ```
 
-`secret` is `OPTICORE_HOOK_SECRET`. `s` carries the device identity, the Inform
-events, the Inform parameters, the prefetched parameters and, from step 2, the
-results of the previous step. `s.State` is whatever string you returned last
+The hook carries no credential: serve it on loopback, a unix socket, or behind
+TLS, because whoever can answer it chooses the tasks Opticore will run on a
+device. `s` carries the device identity, the Inform events, the Inform
+parameters, the prefetched parameters and, from step 2, the results of the
+previous step. `s.State` is whatever string you returned last
 time, so keep per-device state in your reply. Set `OPTICORE_HOOK_URL` to this
 endpoint and `OPTICORE_HOOK_EVENTS` to the events you want. Returning an error
 sends 500, which the daemon treats as "hook failed, session continues".
@@ -636,10 +637,13 @@ still queues; a confirm says so.
   pair in the ONTs' `ManagementServer.Username` / `Password`.
 - **`/v1` has no authentication.** The API listener can read devices, queue
   tasks, read every stored secret and factory-reset hardware, so
-  `OPTICORE_API_ADDR` is
-  the access control: bind it to the interface your provisioning system uses,
-  never to a network with devices or end users on it, and prefer a private
-  address over `:8081`. Anyone who reaches it is you.
+  `OPTICORE_API_ADDR` is the access control: bind it to the interface your
+  provisioning system uses, never to a network with devices or end users on it,
+  and prefer a private address over `:8081`. Anyone who reaches it is you.
+- **The inform hook has no authentication either.** Whoever can answer
+  `OPTICORE_HOOK_URL` decides which tasks Opticore runs on the device, so serve
+  it on loopback, a unix socket or https. A plain `http://` hook URL across a
+  network lets anything on the path write to your ONTs.
 - **Secrets are not hidden at all.** Parameter values written to
   `password|passphrase|secret|psk|key` leaves, and the connection-request
   password, sit readable in PostgreSQL and come back over `/v1` as stored. A

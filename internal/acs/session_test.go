@@ -631,7 +631,7 @@ func TestCloseMarksNonIdempotentInflightUnknown(t *testing.T) {
 // second session.
 func TestHookProvisionerRunsInSession(t *testing.T) {
 	var steps []hook.Step
-	prov := httptest.NewServer(client.HookHandler("k", func(_ context.Context, s hook.Step) ([]hook.Task, error) {
+	prov := httptest.NewServer(client.HookHandler(func(_ context.Context, s hook.Step) ([]hook.Task, error) {
 		steps = append(steps, s)
 		switch s.Step {
 		case 1:
@@ -648,7 +648,7 @@ func TestHookProvisionerRunsInSession(t *testing.T) {
 	h := newHarnessWith(t, func(f *fakeCPE) {
 		f.params = map[string]string{"InternetGatewayDevice.ManagementServer.PeriodicInformInterval": "300"}
 	}, func(_ *harness, s *Sessions) {
-		c, err := hook.New(prov.URL, "k", 2*time.Second)
+		c, err := hook.New(prov.URL, 2*time.Second)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -699,7 +699,7 @@ func TestHookFailureFallsBack(t *testing.T) {
 	defer prov.Close()
 
 	h := newHarnessWith(t, nil, func(_ *harness, s *Sessions) {
-		c, err := hook.New(prov.URL, "k", 2*time.Second)
+		c, err := hook.New(prov.URL, 2*time.Second)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -737,14 +737,14 @@ func TestHookFailureFallsBack(t *testing.T) {
 // Only events on the trigger list start the hook.
 func TestHookNotCalledWithoutTriggerEvent(t *testing.T) {
 	calls := 0
-	prov := httptest.NewServer(client.HookHandler("k", func(context.Context, hook.Step) ([]hook.Task, error) {
+	prov := httptest.NewServer(client.HookHandler(func(context.Context, hook.Step) ([]hook.Task, error) {
 		calls++
 		return nil, nil
 	}))
 	defer prov.Close()
 
 	h := newHarnessWith(t, nil, func(_ *harness, s *Sessions) {
-		c, _ := hook.New(prov.URL, "k", time.Second)
+		c, _ := hook.New(prov.URL, time.Second)
 		s.Hook = c
 		s.HookEvents = []string{"0 BOOTSTRAP"}
 	})

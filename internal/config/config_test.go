@@ -63,7 +63,6 @@ func TestLoadOverrides(t *testing.T) {
 	m["CWMP_SESSION_TIMEOUT"] = "45s"
 	m["CWMP_ADDR"] = "10.0.0.5:7547"
 	m["OPTICORE_HOOK_URL"] = "unix:/run/provisioner.sock"
-	m["OPTICORE_HOOK_SECRET"] = "s3cret"
 	m["OPTICORE_HOOK_EVENTS"] = "0 BOOTSTRAP, 1 BOOT"
 	m["OPTICORE_HOOK_PREFETCH"] = "InternetGatewayDevice.WANDevice.,InternetGatewayDevice.DeviceInfo."
 	m["OPTICORE_TASK_EXPIRY"] = "1h"
@@ -129,17 +128,9 @@ func TestLoadErrors(t *testing.T) {
 			wantParts: []string{"CWMP_GPV_BATCH"},
 		},
 		{
-			name: "hook url without secret",
-			mutate: func(m map[string]string) {
-				m["OPTICORE_HOOK_URL"] = "http://provisioner:9000"
-			},
-			wantParts: []string{"OPTICORE_HOOK_SECRET"},
-		},
-		{
 			name: "hook url bad scheme",
 			mutate: func(m map[string]string) {
 				m["OPTICORE_HOOK_URL"] = "ftp://provisioner"
-				m["OPTICORE_HOOK_SECRET"] = "x"
 			},
 			wantParts: []string{"OPTICORE_HOOK_URL"},
 		},
