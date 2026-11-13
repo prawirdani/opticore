@@ -13,6 +13,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,6 +33,8 @@ type Server struct {
 	SessionTimeout time.Duration // idle limit between POSTs
 	MaxDuration    time.Duration // hard session cap
 	MaxSessions    int
+	Allow          []netip.Prefix // source addresses accepted; empty: any
+	Auth           *Auth          // nil: devices need no credentials
 
 	mu       sync.Mutex
 	byID     map[string]*session
@@ -149,6 +152,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !s.allowed(r.RemoteAddr) {
+		s.fail(w, r, http.StatusForbidden, "source address not allowed")
+		return
+	}
 	body, status, err := s.readBody(r)
 	if err != nil {
 		s.fail(w, r, status, err.Error())
@@ -157,6 +164,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ref, _ := r.Context().Value(connKey{}).(*connRef)
 	ss := s.lookup(r, ref)
+	if ss == nil && s.Auth != nil && !s.Auth.Check(r) {
+		// Keep the connection: the device retries the Inform on it with
+		// credentials (TR-069 §3.4.4).
+		s.Logger.Debug("cwmp auth challenge", "remote", r.RemoteAddr, "had_credentials", r.Header.Get("Authorization") != "")
+		s.Auth.Challenge(w)
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 
 	d := docPool.Get().(*Doc)
 	m := msgPool.Get().(*Message)
@@ -561,6 +576,24 @@ func escID(s string) string {
 		b.WriteString(strings.ToUpper(strconv.FormatUint(uint64(c), 16)))
 	}
 	return b.String()
+}
+
+// allowed reports whether a remote "ip:port" is inside the allowlist.
+func (s *Server) allowed(remote string) bool {
+	if len(s.Allow) == 0 {
+		return true
+	}
+	ap, err := netip.ParseAddrPort(remote)
+	if err != nil {
+		return false
+	}
+	ip := ap.Addr().Unmap()
+	for _, p := range s.Allow {
+		if p.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func hostOnly(addr string) string {

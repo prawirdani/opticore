@@ -767,3 +767,37 @@ func TestWakeUnauthorizedClearsCredentials(t *testing.T) {
 		t.Errorf("credentials kept after a refused wake: %+v", d)
 	}
 }
+
+// A ConnectionRequestURL that does not point back at the Inform's source is
+// not stored and earns no credentials: a spoofed Inform cannot redirect wakes.
+func TestCRURLMustMatchSource(t *testing.T) {
+	h := newHarnessWith(t, nil, func(_ *harness, s *Sessions) { s.CRMatchSource = true })
+	h.sess.inform("48575443BD7589AB", []string{"0 BOOTSTRAP"}) // URL host 10.20.3.41, source 127.0.0.1
+	if n := h.sess.run(); n != 0 {
+		t.Fatalf("answered %d ACS requests, want 0 (no credential write)", n)
+	}
+	d, err := h.st.GetDevice(context.Background(), "48575443BD7589AB")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.CRURL != "" || d.CRSetAt != nil {
+		t.Errorf("unverified CR URL kept: url=%q set=%v", d.CRURL, d.CRSetAt)
+	}
+}
+
+func TestCRHostIs(t *testing.T) {
+	for _, tc := range []struct {
+		url, addr string
+		want      bool
+	}{
+		{"http://172.16.106.10:7547/x", "172.16.106.10", true},
+		{"http://172.16.106.10:7547/x", "::ffff:172.16.106.10", true},
+		{"http://172.16.106.11:7547/x", "172.16.106.10", false},
+		{"http://evil.example/x", "172.16.106.10", false},
+		{"::", "172.16.106.10", false},
+	} {
+		if got := crHostIs(tc.url, tc.addr); got != tc.want {
+			t.Errorf("crHostIs(%q,%q) = %v", tc.url, tc.addr, got)
+		}
+	}
+}

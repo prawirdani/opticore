@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
+	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
@@ -24,6 +25,10 @@ type Config struct {
 	CWMPRequestTimeout time.Duration
 	CWMPMaxBody        int64
 	CWMPMaxSessions    int
+	CWMPAllowCIDRs     []netip.Prefix // device source allowlist; empty: any
+	CWMPCRMatchSource  bool           // ConnectionRequestURL host must be the Inform's source IP
+	CWMPAuthUsername   string         // device-to-ACS credentials; empty: none
+	CWMPAuthPassword   string
 
 	APIAddr  string
 	FileAddr string
@@ -148,6 +153,29 @@ func (l *loader) list(name, def string) []string {
 	return out
 }
 
+// prefixes parses a comma list of CIDRs or bare IPs.
+func (l *loader) prefixes(name string) []netip.Prefix {
+	var out []netip.Prefix
+	for _, v := range l.list(name, "") {
+		if !strings.Contains(v, "/") {
+			a, err := netip.ParseAddr(v)
+			if err != nil {
+				l.fail("%s: %q is not an IP or CIDR", name, v)
+				continue
+			}
+			out = append(out, netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen()))
+			continue
+		}
+		p, err := netip.ParsePrefix(v)
+		if err != nil {
+			l.fail("%s: %q is not an IP or CIDR", name, v)
+			continue
+		}
+		out = append(out, p.Masked())
+	}
+	return out
+}
+
 // Load reads the full daemon configuration and validates every value.
 func Load(getenv func(string) string) (Config, error) {
 	l := &loader{getenv: getenv}
@@ -160,6 +188,10 @@ func Load(getenv func(string) string) (Config, error) {
 		CWMPRequestTimeout: l.dur("CWMP_REQUEST_TIMEOUT", 10*time.Second),
 		CWMPMaxBody:        l.size("CWMP_MAX_BODY", 10<<20),
 		CWMPMaxSessions:    l.integer("CWMP_MAX_SESSIONS", 1000),
+		CWMPAllowCIDRs:     l.prefixes("CWMP_ALLOW_CIDRS"),
+		CWMPCRMatchSource:  l.boolean("CWMP_CR_URL_MATCH_SOURCE", true),
+		CWMPAuthUsername:   l.str("CWMP_AUTH_USERNAME", ""),
+		CWMPAuthPassword:   l.str("CWMP_AUTH_PASSWORD", ""),
 		APIAddr:            l.addr("OPTICORE_API_ADDR", ":8081"),
 		APIInsecureLocal:   l.boolean("OPTICORE_API_INSECURE_LOCAL", false),
 		APIRequireReveal:   l.boolean("OPTICORE_API_REQUIRE_REVEAL", true),
@@ -187,6 +219,10 @@ func Load(getenv func(string) string) (Config, error) {
 	case "debug", "info", "warn", "error":
 	default:
 		l.fail("OPTICORE_LOG_LEVEL: %q is not one of debug, info, warn, error", cfg.LogLevel)
+	}
+
+	if (cfg.CWMPAuthUsername == "") != (cfg.CWMPAuthPassword == "") {
+		l.fail("CWMP_AUTH_USERNAME and CWMP_AUTH_PASSWORD must be set together")
 	}
 
 	if cfg.HookURL != "" {

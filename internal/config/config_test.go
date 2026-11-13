@@ -253,3 +253,23 @@ func TestParseSize(t *testing.T) {
 		}
 	}
 }
+
+func TestCWMPSecurity(t *testing.T) {
+	m := required()
+	m["CWMP_ALLOW_CIDRS"] = "172.16.106.0/24, 10.0.0.5"
+	m["CWMP_AUTH_USERNAME"] = "acs"
+	m["CWMP_AUTH_PASSWORD"] = "pw"
+	cfg, err := Load(env(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.CWMPAllowCIDRs) != 2 || cfg.CWMPAllowCIDRs[1].String() != "10.0.0.5/32" || !cfg.CWMPCRMatchSource {
+		t.Errorf("cfg = %+v %v", cfg.CWMPAllowCIDRs, cfg.CWMPCRMatchSource)
+	}
+	m["CWMP_ALLOW_CIDRS"] = "nope"
+	m["CWMP_AUTH_PASSWORD"] = ""
+	_, err = Load(env(m))
+	if err == nil || !strings.Contains(err.Error(), "CWMP_ALLOW_CIDRS") || !strings.Contains(err.Error(), "CWMP_AUTH_USERNAME") {
+		t.Errorf("err = %v", err)
+	}
+}

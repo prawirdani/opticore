@@ -73,6 +73,9 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
+		if store.IsMissingTable(err) {
+			err = fmt.Errorf("%w (database schema missing: run `opticore migrate`)", err)
+		}
 		fmt.Fprintln(os.Stderr, "opticore:", err)
 		os.Exit(1)
 	}
@@ -103,12 +106,18 @@ func serve(ctx context.Context) error {
 	if err := st.Migrate(ctx); err != nil {
 		return err
 	}
+	if v, err := st.SchemaVersion(ctx); err == nil {
+		log.Info("database schema", "version", v)
+	}
+	log.Info("cwmp device security", "allow_cidrs", len(cfg.CWMPAllowCIDRs),
+		"cr_url_match_source", cfg.CWMPCRMatchSource, "device_auth", cfg.CWMPAuthUsername != "")
 
 	svc := &acs.Service{Store: st, Key: cfg.SecretKey, Waker: wake.New(cfg.CWMPCRTimeout, log), Logger: log}
 	sessions := &acs.Sessions{
 		Store: st, Svc: svc, Key: cfg.SecretKey, Logger: log,
 		GPVBatch: cfg.CWMPGPVBatch, MaxAttempts: cfg.TaskMaxAttempts,
-		HookEvents: cfg.HookEvents, HookPrefetch: cfg.HookPrefetch, HookTimeout: cfg.HookTimeout,
+		CRMatchSource: cfg.CWMPCRMatchSource,
+		HookEvents:    cfg.HookEvents, HookPrefetch: cfg.HookPrefetch, HookTimeout: cfg.HookTimeout,
 	}
 	if cfg.HookURL != "" {
 		hc, err := hook.New(cfg.HookURL, cfg.HookSecret, cfg.HookStepTimeout)
@@ -125,6 +134,10 @@ func serve(ctx context.Context) error {
 		MaxBody:        cfg.CWMPMaxBody,
 		SessionTimeout: cfg.CWMPSessionTimeout,
 		MaxSessions:    cfg.CWMPMaxSessions,
+		Allow:          cfg.CWMPAllowCIDRs,
+	}
+	if cfg.CWMPAuthUsername != "" {
+		cs.Auth = cwmp.NewAuth(cfg.CWMPAuthUsername, cfg.CWMPAuthPassword)
 	}
 	cs.Start()
 	defer cs.Stop()

@@ -79,11 +79,20 @@ none is rejected with a 401 (retry storms).
 the CWMP port can send an `Inform` carrying a real device's serial and receive
 whatever tasks are queued for it, including a PPPoE password a client is
 pushing, in clear HTTP. The CWMP port must therefore be reachable only from an
-isolated management VLAN. Before production rollout, also do at least one of:
+isolated management VLAN. Opticore adds three guards on top:
 
-- check the Inform's source address against the expected management subnet,
-  and refuse to run `set` tasks carrying secrets otherwise;
-- enable ACS-side HTTP Digest once the fleet's credentials are known.
+- `CWMP_ALLOW_CIDRS`: requests from outside the listed management subnets get
+  `403` before the body is read. Empty accepts any source.
+- `CWMP_CR_URL_MATCH_SOURCE` (default on): a `ConnectionRequestURL` whose host
+  is not the Inform's source IP is dropped, and that session gets no
+  connection-request credentials, so a spoofed Inform cannot redirect wakes or
+  learn the credentials.
+- `CWMP_AUTH_USERNAME` / `CWMP_AUTH_PASSWORD`: device-to-ACS authentication.
+  The first message of a session without valid credentials gets `401` with a
+  Digest (MD5, `qop=auth`) and a Basic challenge; the device retries on the
+  same connection. The ONTs must carry the same pair in
+  `ManagementServer.Username` / `Password`, set by whatever provisions the ACS
+  URL. Nonces are HMAC-signed and valid for 5 minutes, so no nonce table.
 
 ## 4. Scope — outbound
 
@@ -470,8 +479,8 @@ Events: every Inform event code, plus firmware change, WAN IP change, and task
 and job transitions — written in the same transaction as the change that caused
 them, never by a second service. Freshness transitions (fresh → stale →
 offline) cannot come from the inform handler, because staleness means no inform
-arrived; the janitor writes them by comparing `last_inform` with the device's
-interval.
+arrived. Today freshness is computed on read from `last_inform` and the
+device's interval; no transition events are written yet.
 
 Suggested schema:
 
@@ -576,9 +585,10 @@ typed task builders, `*Fault` errors, token auth, `Watch(ctx, filter)` over SSE
 with automatic `Last-Event-ID` resume, and `HookHandler` (§7).
 
 Task-creating calls (`POST .../tasks`, `POST /jobs`) accept an
-`Idempotency-Key` header. A retry with the same key within 24 h returns the
-original result instead of enqueuing again, so a client retrying after a
-network error cannot reboot a device twice.
+`Idempotency-Key` header. Keys are kept permanently and are unique per
+device, so a retry with the same key returns the original result instead of
+enqueuing again, and a client retrying after a network error cannot reboot a
+device twice. A batch derives one key per task from the header value.
 
 **Control plane (HTTP/JSON, private port, bearer token):**
 
@@ -603,9 +613,10 @@ read,write[,reveal]` mints a token (printed once).
 `/jobs/:id`, `/firmware`.
 
 **Push:** `GET /events` (SSE) streams Inform events, task and job transitions,
-and freshness changes, so a client can react without polling. Each event
-carries its `events.id`; a client reconnecting with `Last-Event-ID` resumes from
-there, bounded by event retention. A `type` filter narrows the stream
+and freshness changes, so a client can react without polling. Event ids are
+`e<events.id>` for events and `t<task id>:<updated unix nano>` for task
+updates; a client reconnecting with `Last-Event-ID` resumes from there, bounded
+by event retention. A `type` filter narrows the stream
 (e.g. `?type=bootstrap,task`).
 
 **Auth:** bearer service token per client, SHA-256-hashed at rest
@@ -937,8 +948,9 @@ GET /devices?product_class=HG8145V5&freshness=stale&limit=50
 }
 ```
 
-`freshness`: `fresh` (informed within one interval), `stale` (within three),
-`offline` (longer). `cr_ready`: connection-request credentials are set (§5).
+`freshness`: `fresh` (informed within two inform intervals), `stale` (within
+six), `offline` (longer). The interval defaults to 300 s when unknown.
+`cr_ready`: connection-request credentials are set (§5).
 
 Parameter map entry (inside `GET /devices/:id/params?prefix=…`):
 
@@ -955,7 +967,7 @@ Secret values in `tasks.args` / `prev` return masked unless the caller sends
 SSE event:
 
 ```text
-id: 81234
+id: e81234
 event: bootstrap
 data: {"device_id": "00259E-HG8145V5-48575443BD7589AB", "at": "2026-11-13T01:24:00Z", "codes": ["0 BOOTSTRAP", "1 BOOT"]}
 ```
@@ -979,6 +991,9 @@ non-zero with a readable error. The TUI and subcommands need only
 | `CWMP_REQUEST_TIMEOUT` | `10s` | per-request read/write limit |
 | `CWMP_MAX_BODY` | `10MiB` | largest accepted request body (after decompression) |
 | `CWMP_MAX_SESSIONS` | `1000` | concurrent sessions before `503` + `Retry-After` |
+| `CWMP_ALLOW_CIDRS` | empty (any) | comma list of CIDRs or IPs allowed to reach the CWMP listener (§3) |
+| `CWMP_CR_URL_MATCH_SOURCE` | `true` | ignore a `ConnectionRequestURL` whose host is not the Inform's source IP (§3) |
+| `CWMP_AUTH_USERNAME` / `CWMP_AUTH_PASSWORD` | empty (off) | device-to-ACS Digest/Basic credentials; set both or neither (§3) |
 | `OPTICORE_API_ADDR` | `:8081` | HTTP API (`/v1`) and SSE |
 | `OPTICORE_API_INSECURE_LOCAL` | `false` | accept `/v1` without a token; refused unless the listener binds loopback |
 | `OPTICORE_API_REQUIRE_REVEAL` | `true` | `?reveal=1` needs a token with the `reveal` scope |

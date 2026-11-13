@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -26,6 +28,10 @@ type Sessions struct {
 	Logger      *slog.Logger
 	GPVBatch    int // exact names per GetParameterValues
 	MaxAttempts int
+	// CRMatchSource refuses a ConnectionRequestURL whose host is not the
+	// Inform's source IP, so a spoofed Inform cannot redirect wakes or receive
+	// connection-request credentials.
+	CRMatchSource bool
 
 	Hook         *hook.Client // nil: no hook
 	HookEvents   []string
@@ -80,6 +86,17 @@ type hookState struct {
 
 func (h *Sessions) st(s *cwmp.Session) *state { return s.Data.(*state) }
 
+// crHostIs reports whether the URL's host is the IP addr.
+func crHostIs(raw, addr string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	a, err1 := netip.ParseAddr(u.Hostname())
+	b, err2 := netip.ParseAddr(addr)
+	return err1 == nil && err2 == nil && a.Unmap() == b.Unmap()
+}
+
 func (h *Sessions) Inform(ctx context.Context, s *cwmp.Session, in *cwmp.Inform) error {
 	rec := store.InformRecord{
 		ID:           s.DeviceID,
@@ -112,6 +129,18 @@ func (h *Sessions) Inform(ctx context.Context, s *cwmp.Session, in *cwmp.Inform)
 			}
 		}
 	}
+	crTrusted := true
+	if rec.CRURL != "" && h.CRMatchSource && !crHostIs(rec.CRURL, s.RemoteAddr) {
+		h.Logger.Warn("inform: ConnectionRequestURL host is not the source address; ignoring it",
+			"device_id", s.DeviceID, "cr_url", rec.CRURL, "remote", s.RemoteAddr)
+		for name := range rec.Params {
+			if strings.HasSuffix(name, ".ManagementServer.ConnectionRequestURL") {
+				delete(rec.Params, name)
+			}
+		}
+		rec.CRURL = ""
+		crTrusted = false // no credentials for an unverified sender
+	}
 	bootstrap := false
 	for _, e := range in.Events {
 		rec.Events = append(rec.Events, e.Code)
@@ -128,7 +157,7 @@ func (h *Sessions) Inform(ctx context.Context, s *cwmp.Session, in *cwmp.Inform)
 		dev:      dev,
 		root:     root,
 		queue:    tasks,
-		crWanted: root != "" && (bootstrap || dev.CRSetAt == nil || dev.CRPassword == ""),
+		crWanted: crTrusted && root != "" && (bootstrap || dev.CRSetAt == nil || dev.CRPassword == ""),
 		instance: map[string]int{},
 		dead:     map[string]bool{},
 		events:   rec.Events,

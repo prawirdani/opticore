@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
@@ -154,6 +155,20 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("store: migrate: %w", err)
 	}
 	return nil
+}
+
+// SchemaVersion is the applied goose migration version.
+func (s *Store) SchemaVersion(ctx context.Context) (int64, error) {
+	var v int64
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied`).Scan(&v)
+	return v, err
+}
+
+// IsMissingTable reports a Postgres undefined_table error (42P01): the schema
+// was never migrated.
+func IsMissingTable(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "42P01"
 }
 
 // AcquireLeader takes the single-daemon advisory lock on a pinned connection.
