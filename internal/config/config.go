@@ -41,6 +41,9 @@ type Config struct {
 	TaskMaxAttempts int
 	TaskRetention   time.Duration
 	EventRetention  time.Duration
+
+	// AutoTreeRead queues one root get per device whose tree was never read.
+	AutoTreeRead bool
 }
 
 // ValidationError lists every problem found while loading configuration.
@@ -193,6 +196,7 @@ func Load(getenv func(string) string) (Config, error) {
 		TaskMaxAttempts:    l.integer("OPTICORE_TASK_MAX_ATTEMPTS", 5),
 		TaskRetention:      l.dur("OPTICORE_TASK_RETENTION", 720*time.Hour),
 		EventRetention:     l.dur("OPTICORE_EVENT_RETENTION", 720*time.Hour),
+		AutoTreeRead:       l.boolean("OPTICORE_AUTO_TREE_READ", true),
 	}
 
 	if cfg.DBDSN == "" {

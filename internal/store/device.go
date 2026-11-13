@@ -29,6 +29,7 @@ ON CONFLICT (id) DO UPDATE SET
 	inform_interval = CASE WHEN EXCLUDED.inform_interval > 0
 		THEN EXCLUDED.inform_interval ELSE devices.inform_interval END,
 	params = CASE WHEN $12 THEN EXCLUDED.params ELSE devices.params || EXCLUDED.params END,
+	tree_read_at = CASE WHEN $12 THEN NULL ELSE devices.tree_read_at END,
 	pending_reboot = CASE WHEN $12 THEN false ELSE devices.pending_reboot END
 RETURNING ` + deviceCols
 
@@ -199,6 +200,36 @@ func (s *Store) MergeParams(ctx context.Context, deviceID string, params map[str
 		return ErrDeviceNotFound
 	}
 	return nil
+}
+
+// MarkTreeRead records that the whole parameter tree was read into the cache.
+func (s *Store) MarkTreeRead(ctx context.Context, deviceID string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE devices SET tree_read_at = now() WHERE id = $1`, deviceID)
+	if err != nil {
+		return fmt.Errorf("store: mark tree read: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrDeviceNotFound
+	}
+	return nil
+}
+
+// HasPendingRootGet reports whether a get of the whole tree (no paths, or
+// exactly root) is pending or running, so a second one is not queued.
+func (s *Store) HasPendingRootGet(ctx context.Context, deviceID, root string) (bool, error) {
+	var busy bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM tasks
+		WHERE device_id = $1 AND name = 'get' AND status IN ('pending', 'running')
+		  AND (jsonb_typeof(args->'paths') IS DISTINCT FROM 'array'
+		       OR jsonb_array_length(args->'paths') = 0
+		       OR args->'paths' = to_jsonb(ARRAY[$2]::text[])))`,
+		deviceID, root).Scan(&busy)
+	if err != nil {
+		return false, fmt.Errorf("store: pending root get: %w", err)
+	}
+	return busy, nil
 }
 
 // SetCRCredentials stores the connection-request password.

@@ -55,6 +55,9 @@ type Device struct {
 	PendingReboot   bool
 	LastFault       json.RawMessage
 	Params          map[string]Param
+	// TreeReadAt is when the whole parameter tree was last read into Params.
+	// nil: the cache holds only Inform parameters.
+	TreeReadAt *time.Time
 }
 
 // Task is a row of tasks.
@@ -219,7 +222,7 @@ func (s *Store) NewestInform(ctx context.Context) (time.Time, error) {
 
 const deviceCols = `id, serial, oui, product_class, software_version, first_inform,
 	last_inform, inform_interval, last_addr, cr_url, cr_username, cr_password,
-	cr_set_at, pending_reboot, last_fault, params`
+	cr_set_at, pending_reboot, last_fault, params, tree_read_at`
 
 const taskCols = `id, device_id, job_id, batch_id::text, batch_seq, name, args,
 	prev, result, status, attempts, fault_code, fault, created_at, run_at,
@@ -233,7 +236,8 @@ func scanDevice(row pgx.Row) (Device, error) {
 	)
 	err := row.Scan(&d.ID, &d.Serial, &d.OUI, &d.ProductClass, &d.SoftwareVersion,
 		&d.FirstInform, &d.LastInform, &d.InformInterval, &d.LastAddr, &d.CRURL,
-		&d.CRUsername, &d.CRPassword, &d.CRSetAt, &d.PendingReboot, &lastFault, &params)
+		&d.CRUsername, &d.CRPassword, &d.CRSetAt, &d.PendingReboot, &lastFault, &params,
+		&d.TreeReadAt)
 	if err != nil {
 		return Device{}, err
 	}

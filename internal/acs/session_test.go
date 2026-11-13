@@ -181,8 +181,18 @@ func (f *fakeCPE) post(body string) (int, []byte) {
 }
 
 func (f *fakeCPE) inform(serial string, events []string) int {
+	return f.informWith(serial, events, informParams)
+}
+
+// informNoParams sends an Inform with an empty ParameterList, so the ACS
+// cannot learn the device root.
+func (f *fakeCPE) informNoParams(serial string, events []string) int {
+	return f.informWith(serial, events, "")
+}
+
+func (f *fakeCPE) informWith(serial string, events []string, params string) int {
 	f.t.Helper()
-	body := fmt.Sprintf(informTpl, serial, eventList(events), time.Now().UTC().Format(time.RFC3339))
+	body := fmt.Sprintf(informTpl, serial, eventList(events), time.Now().UTC().Format(time.RFC3339), params)
 	if f.root != "" && f.root != "InternetGatewayDevice." {
 		body = strings.ReplaceAll(body, "InternetGatewayDevice.", f.root)
 	}
@@ -207,13 +217,17 @@ const informTpl = `<?xml version="1.0" encoding="UTF-8"?>
 <cwmp:MaxEnvelopes>1</cwmp:MaxEnvelopes>
 <cwmp:CurrentTime>%s</cwmp:CurrentTime>
 <cwmp:RetryCount>0</cwmp:RetryCount>
-<cwmp:ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[4]">
+%s
+</cwmp:Inform></soap-env:Body></soap-env:Envelope>`
+
+// informParams is the ParameterList of the default Inform: management server
+// facts, the software version and a leaked CR password.
+const informParams = `<cwmp:ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[4]">
 <cwmp:ParameterValueStruct><cwmp:Name>InternetGatewayDevice.ManagementServer.ConnectionRequestURL</cwmp:Name><cwmp:Value>http://10.20.3.41:7547/abc</cwmp:Value><cwmp:Type xsi:type="xsd:string">xsd:string</cwmp:Type></cwmp:ParameterValueStruct>
 <cwmp:ParameterValueStruct><cwmp:Name>InternetGatewayDevice.ManagementServer.PeriodicInformInterval</cwmp:Name><cwmp:Value>300</cwmp:Value><cwmp:Type xsi:type="xsd:unsignedInt">xsd:unsignedInt</cwmp:Type></cwmp:ParameterValueStruct>
 <cwmp:ParameterValueStruct><cwmp:Name>InternetGatewayDevice.DeviceInfo.SoftwareVersion</cwmp:Name><cwmp:Value>V5R020C10S271</cwmp:Value><cwmp:Type xsi:type="xsd:string">xsd:string</cwmp:Type></cwmp:ParameterValueStruct>
 <cwmp:ParameterValueStruct><cwmp:Name>InternetGatewayDevice.ManagementServer.ConnectionRequestPassword</cwmp:Name><cwmp:Value>leaked</cwmp:Value><cwmp:Type xsi:type="xsd:string">xsd:string</cwmp:Type></cwmp:ParameterValueStruct>
-</cwmp:ParameterList>
-</cwmp:Inform></soap-env:Body></soap-env:Envelope>`
+</cwmp:ParameterList>`
 
 // run drives one device session to completion and returns how many ACS
 // requests it answered. The loop mirrors CWMP: after the InformResponse the
@@ -534,7 +548,7 @@ func TestIdleSessionReplacedByNewInform(t *testing.T) {
 		t.Fatal(code)
 	}
 	// The first session is abandoned without answering the queued CR set.
-	code, body := h.sess.post(fmt.Sprintf(informTpl, "48575443BD7589AB", eventList([]string{"1 BOOT"}), time.Now().UTC().Format(time.RFC3339)))
+	code, body := h.sess.post(fmt.Sprintf(informTpl, "48575443BD7589AB", eventList([]string{"1 BOOT"}), time.Now().UTC().Format(time.RFC3339), informParams))
 	if code != http.StatusOK {
 		t.Fatalf("second inform: %d %s", code, body)
 	}
@@ -881,6 +895,197 @@ func TestGetTaskCountsEveryChunk(t *testing.T) {
 	}
 	if err := json.Unmarshal(ts[0].Result, &res); err != nil || res.Count != 2 {
 		t.Errorf("result = %s (err %v), want count 2 across both chunks", ts[0].Result, err)
+	}
+}
+
+// ---- automatic tree read ----
+
+func withAutoTreeRead(_ *harness, s *Sessions) { s.AutoTreeRead = true }
+
+func countTasks(t *testing.T, h *harness, serial, name string) int {
+	t.Helper()
+	ts, err := h.st.ListTasks(context.Background(), serial, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, x := range ts {
+		if x.Name == name {
+			n++
+		}
+	}
+	return n
+}
+
+// A device that has never had its tree read gets one root get at the end of
+// its first session, and never a second one while the cache stays whole.
+func TestAutoTreeReadFillsCacheOnFirstInform(t *testing.T) {
+	ctx := context.Background()
+	serial := "48575443BD7589AB"
+	h := newHarnessWith(t, func(f *fakeCPE) {
+		f.params = map[string]string{
+			"InternetGatewayDevice.DeviceInfo.SoftwareVersion":           "V5R020C10S271",
+			"InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID": "HomeNet",
+		}
+	}, withAutoTreeRead)
+
+	h.sess.inform(serial, []string{"0 BOOTSTRAP", "1 BOOT"})
+	if n := h.sess.run(); n != 2 { // CR credentials, then the tree read
+		t.Fatalf("answered %d requests, want 2 (CR set, root GPV)", n)
+	}
+	gpvs := h.sess.gpvNames()
+	if len(gpvs) != 1 || len(gpvs[0]) != 1 || gpvs[0][0] != "InternetGatewayDevice." {
+		t.Fatalf("GPVs = %v, want one root partial path", gpvs)
+	}
+	d, err := h.st.GetDevice(ctx, serial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.TreeReadAt == nil {
+		t.Error("tree_read_at not set after the root read")
+	}
+	if got := d.Params["InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID"].Value; got != "HomeNet" {
+		t.Errorf("cached SSID = %q, want HomeNet", got)
+	}
+	ts, _ := h.st.ListTasks(ctx, serial, 20)
+	get := findTask(t, ts, "get")
+	if get.Status != "done" {
+		t.Errorf("auto read task = %s, want done", get.Status)
+	}
+
+	// Second inform: the tree is cached, so nothing is queued.
+	h.sess.inform(serial, []string{"2 PERIODIC"})
+	if n := h.sess.run(); n != 0 {
+		t.Fatalf("second session answered %d requests, want 0", n)
+	}
+	if n := countTasks(t, h, serial, "get"); n != 1 {
+		t.Errorf("get tasks = %d, want 1", n)
+	}
+}
+
+// 0 BOOTSTRAP replaces the cache, so the tree must be read again.
+func TestAutoTreeReadBootstrapReadsAgain(t *testing.T) {
+	ctx := context.Background()
+	serial := "48575443BD7589AB"
+	h := newHarnessWith(t, nil, withAutoTreeRead)
+
+	h.sess.inform(serial, []string{"1 BOOT"})
+	h.sess.run()
+	d, _ := h.st.GetDevice(ctx, serial)
+	if d.TreeReadAt == nil {
+		t.Fatal("tree_read_at not set after the first session")
+	}
+
+	h.sess.inform(serial, []string{"0 BOOTSTRAP"})
+	if n := h.sess.run(); n != 2 { // CR credentials, root GPV
+		t.Fatalf("bootstrap session answered %d requests, want 2", n)
+	}
+	d, _ = h.st.GetDevice(ctx, serial)
+	if d.TreeReadAt == nil {
+		t.Error("tree_read_at not set again after the bootstrap")
+	}
+	if n := countTasks(t, h, serial, "get"); n != 2 {
+		t.Errorf("get tasks = %d, want 2", n)
+	}
+}
+
+// A root get already queued (by the API) must not be duplicated, even when it
+// is not runnable yet.
+func TestAutoTreeReadSkipsPendingRootGet(t *testing.T) {
+	ctx := context.Background()
+	serial := "48575443BD7589AB"
+	var sessions *Sessions
+	h := newHarnessWith(t, nil, func(_ *harness, s *Sessions) { sessions = s })
+
+	h.sess.inform(serial, []string{"0 BOOTSTRAP", "1 BOOT"})
+	h.sess.run() // CR credentials only: auto read off here
+
+	if _, err := h.st.CreateTasks(ctx, serial, []store.NewTask{
+		{Name: "get", RunAt: time.Now().Add(time.Hour)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sessions.AutoTreeRead = true
+	h.sess.inform(serial, []string{"2 PERIODIC"})
+	if n := h.sess.run(); n != 0 {
+		t.Fatalf("answered %d requests, want 0", n)
+	}
+	if n := countTasks(t, h, serial, "get"); n != 1 {
+		t.Errorf("get tasks = %d, want 1 (the queued operator get)", n)
+	}
+}
+
+// The automatic read runs after the connection-request credentials and after
+// the tasks already queued.
+func TestAutoTreeReadRunsLast(t *testing.T) {
+	ctx := context.Background()
+	serial := "48575443BD7589AB"
+	h := newHarnessWith(t, func(f *fakeCPE) {
+		f.params = map[string]string{"InternetGatewayDevice.DeviceInfo.UpTime": "42"}
+	}, withAutoTreeRead)
+
+	h.sess.inform(serial, []string{"1 BOOT"})
+	if _, err := h.svc.CreateTasks(ctx, serial, []store.NewTask{{
+		Name: "get", Args: json.RawMessage(`{"paths":["InternetGatewayDevice.DeviceInfo.UpTime"]}`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if n := h.sess.run(); n != 3 { // CR set, operator get, tree read
+		t.Fatalf("answered %d requests, want 3", n)
+	}
+	if sets := h.sess.sets; len(sets) == 0 ||
+		!strings.Contains(sets[0][0][0], ".ManagementServer.ConnectionRequest") {
+		t.Fatalf("sets = %v, want the CR credential SPV first", sets)
+	}
+	gpvs := h.sess.gpvNames()
+	if len(gpvs) != 2 {
+		t.Fatalf("GPVs = %v, want the operator get then the tree read", gpvs)
+	}
+	if len(gpvs[0]) != 1 || gpvs[0][0] != "InternetGatewayDevice.DeviceInfo.UpTime" {
+		t.Errorf("first GPV = %v, want the operator path", gpvs[0])
+	}
+	if len(gpvs[1]) != 1 || gpvs[1][0] != "InternetGatewayDevice." {
+		t.Errorf("last GPV = %v, want the root partial path", gpvs[1])
+	}
+}
+
+func TestAutoTreeReadDisabled(t *testing.T) {
+	ctx := context.Background()
+	serial := "48575443BD7589AB"
+	h := newHarness(t, nil) // Sessions.AutoTreeRead off
+
+	h.sess.inform(serial, []string{"0 BOOTSTRAP", "1 BOOT"})
+	if n := h.sess.run(); n != 1 { // CR credentials only
+		t.Fatalf("answered %d requests, want 1", n)
+	}
+	if n := len(h.sess.gpvNames()); n != 0 {
+		t.Errorf("GPVs = %d, want 0", n)
+	}
+	if n := countTasks(t, h, serial, "get"); n != 0 {
+		t.Errorf("get tasks = %d, want 0", n)
+	}
+	d, _ := h.st.GetDevice(ctx, serial)
+	if d.TreeReadAt != nil {
+		t.Error("tree_read_at set while auto read is disabled")
+	}
+}
+
+// Without a root from the Inform there is nothing to read.
+func TestAutoTreeReadNeedsRoot(t *testing.T) {
+	ctx := context.Background()
+	serial := "48575443BD7589AB"
+	h := newHarnessWith(t, nil, withAutoTreeRead)
+
+	h.sess.informNoParams(serial, []string{"1 BOOT"})
+	if n := h.sess.run(); n != 0 {
+		t.Fatalf("answered %d requests, want 0", n)
+	}
+	if n := countTasks(t, h, serial, "get"); n != 0 {
+		t.Errorf("get tasks = %d, want 0", n)
+	}
+	d, _ := h.st.GetDevice(ctx, serial)
+	if d.TreeReadAt != nil {
+		t.Error("tree_read_at set without a known root")
 	}
 }
 

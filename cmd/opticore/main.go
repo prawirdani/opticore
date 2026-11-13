@@ -171,8 +171,8 @@ func serve(ctx context.Context) error {
 	sessions := &acs.Sessions{
 		Store: st, Svc: svc, Logger: logger,
 		GPVBatch: cfg.CWMPGPVBatch, MaxAttempts: cfg.TaskMaxAttempts,
-		CRMatchSource: cfg.CWMPCRMatchSource,
-		HookEvents:    cfg.HookEvents, HookPrefetch: cfg.HookPrefetch, HookTimeout: cfg.HookTimeout,
+		CRMatchSource: cfg.CWMPCRMatchSource, AutoTreeRead: cfg.AutoTreeRead,
+		HookEvents: cfg.HookEvents, HookPrefetch: cfg.HookPrefetch, HookTimeout: cfg.HookTimeout,
 	}
 	if cfg.HookURL != "" {
 		hc, err := hook.New(cfg.HookURL, cfg.HookSecret, cfg.HookStepTimeout)

@@ -32,6 +32,9 @@ type Sessions struct {
 	// Inform's source IP, so a spoofed Inform cannot redirect wakes or receive
 	// connection-request credentials.
 	CRMatchSource bool
+	// AutoTreeRead queues one root get when the cache never held the whole
+	// tree, so every device fills its tree without an operator task.
+	AutoTreeRead bool
 
 	Hook         *hook.Client // nil: no hook
 	HookEvents   []string
@@ -62,6 +65,8 @@ type state struct {
 	// hook drives the operator provisioner inside this session (§7).
 	hook     *hookState
 	apiQueue []store.Task // tasks that were queued before the hook
+
+	treeQueued bool // the automatic tree read was queued in this session
 
 	stop     bool // end this session (retryable fault: retry on the next wake)
 	cur      *store.Task
@@ -268,7 +273,16 @@ func (h *Sessions) Next(ctx context.Context, s *cwmp.Session) (cwmp.Request, boo
 				continue // hookNext runs on the next iteration
 			}
 			if st.reloaded {
-				return cwmp.Request{}, false, nil
+				// Last in the session: the whole-tree read never delays the
+				// credentials, the hook or queued work.
+				queued, err := h.autoTreeRead(ctx, s, st)
+				if err != nil {
+					return cwmp.Request{}, false, err
+				}
+				if !queued {
+					return cwmp.Request{}, false, nil
+				}
+				continue
 			}
 			st.reloaded = true // pick up tasks enqueued during this session, once
 			tasks, err := h.Store.PendingTasks(ctx, s.DeviceID)
@@ -305,6 +319,35 @@ func (h *Sessions) Next(ctx context.Context, s *cwmp.Session) (cwmp.Request, boo
 		}
 		st.cur, st.steps, st.prev, st.got = &t, steps, nil, 0
 	}
+}
+
+// autoTreeRead queues one ordinary get of the whole tree when the device has
+// never had its tree read. It runs through the task queue like an operator
+// task, so it shows in the task log and is validated the same way. ok is true
+// when a task was queued for this session.
+func (h *Sessions) autoTreeRead(ctx context.Context, s *cwmp.Session, st *state) (bool, error) {
+	if !h.AutoTreeRead || st.treeQueued || st.root == "" || st.dev.TreeReadAt != nil || h.Svc == nil {
+		return false, nil
+	}
+	st.treeQueued = true
+	busy, err := h.Store.HasPendingRootGet(ctx, s.DeviceID, st.root)
+	if err != nil {
+		return false, err
+	}
+	if busy {
+		return false, nil // an operator get will fill the cache
+	}
+	created, err := h.Svc.CreateTasks(ctx, s.DeviceID, []store.NewTask{{Name: "get"}})
+	if err != nil {
+		h.Logger.Printf("WARN auto tree read rejected device=%s err=%v", s.DeviceID, err)
+		return false, nil
+	}
+	if len(created) == 0 {
+		return false, nil
+	}
+	h.Logger.Printf("auto tree read queued device=%s task=%d", s.DeviceID, created[0].ID)
+	st.queue = append(st.queue, created[0])
+	return true, nil
 }
 
 // maxHookSteps bounds the step loop so a provisioner cannot keep a session
@@ -474,6 +517,22 @@ func (h *Sessions) plan(st *state, t *store.Task) ([]cwmp.Request, error) {
 	return nil, fmt.Errorf("task %q is not supported yet", t.Name)
 }
 
+// isRootGet reports whether a get reads the whole tree: no paths, or exactly
+// the device root partial path.
+func isRootGet(st *state, t *store.Task) bool {
+	if t.Name != "get" {
+		return false
+	}
+	var a GetArgs
+	if err := json.Unmarshal(t.Args, &a); err != nil {
+		return false
+	}
+	if len(a.Paths) == 0 {
+		return true
+	}
+	return st.root != "" && len(a.Paths) == 1 && a.Paths[0] == st.root
+}
+
 // subst replaces {instance} with the batch's last add_object result.
 func (h *Sessions) subst(st *state, t *store.Task, paths []string) ([]string, error) {
 	out := make([]string, len(paths))
@@ -549,6 +608,14 @@ func (h *Sessions) Response(ctx context.Context, s *cwmp.Session, req cwmp.Reque
 		st.got += len(cache)
 		if len(st.steps) > 0 {
 			return nil // more chunks of the same get
+		}
+		if isRootGet(st, t) {
+			// The cache now holds the whole tree; no automatic read next session.
+			if err := h.Store.MarkTreeRead(ctx, s.DeviceID); err != nil {
+				return err
+			}
+			at := time.Now().UTC()
+			st.dev.TreeReadAt = &at
 		}
 		return h.done(ctx, s, t, map[string]any{"count": st.got})
 	case "set":

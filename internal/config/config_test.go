@@ -41,6 +41,7 @@ func TestLoadDefaults(t *testing.T) {
 		{"TaskMaxAttempts", cfg.TaskMaxAttempts, 5},
 		{"TaskRetention", cfg.TaskRetention, 720 * time.Hour},
 		{"EventRetention", cfg.EventRetention, 720 * time.Hour},
+		{"AutoTreeRead", cfg.AutoTreeRead, true},
 	}
 	for _, c := range checks {
 		if c.got != c.want {
@@ -66,6 +67,7 @@ func TestLoadOverrides(t *testing.T) {
 	m["OPTICORE_HOOK_EVENTS"] = "0 BOOTSTRAP, 1 BOOT"
 	m["OPTICORE_HOOK_PREFETCH"] = "InternetGatewayDevice.WANDevice.,InternetGatewayDevice.DeviceInfo."
 	m["OPTICORE_TASK_EXPIRY"] = "1h"
+	m["OPTICORE_AUTO_TREE_READ"] = "false"
 
 	cfg, err := Load(env(m))
 	if err != nil {
@@ -73,6 +75,9 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.CWMPGPVBatch != 8 || cfg.CWMPMaxBody != 1_000_000 || cfg.CWMPSessionTimeout != 45*time.Second {
 		t.Errorf("overrides not applied: %+v", cfg)
+	}
+	if cfg.AutoTreeRead {
+		t.Error("OPTICORE_AUTO_TREE_READ=false was not applied")
 	}
 	if cfg.CWMPAddr != "10.0.0.5:7547" || cfg.TaskExpiry != time.Hour {
 		t.Errorf("overrides not applied: %+v", cfg)

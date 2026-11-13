@@ -193,6 +193,7 @@ unit, a container, or a one-off `FOO=1 opticore serve` behaves as written.
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `OPTICORE_AUTO_TREE_READ` | `true` | after a new or factory-reset device's session work, read the whole parameter tree once |
 | `OPTICORE_TASK_EXPIRY` | `10m` | minimum lifetime of a task, from `run_at` |
 | `OPTICORE_TASK_MAX_ATTEMPTS` | `5` | retries before a task is left failed |
 | `OPTICORE_TASK_RETENTION` | `720h` | finished tasks older than this are deleted |
@@ -206,7 +207,11 @@ unit, a container, or a one-off `FOO=1 opticore serve` behaves as written.
    Opticore sets fresh ones. Those two leaves are the only parameters it writes
    on its own. A set touching them directly is rejected.
 3. If a hook is configured and the event matches, the hook runs (see below).
-4. Queued tasks run in order. A batch is a series of tasks with one `batch_id`
+4. Queued tasks run in order. When the device's tree has never been read, or
+   `0 BOOTSTRAP` reset it, one full-tree `get` is queued after them and runs in
+   the same session, so the cache ends up holding the whole tree the way
+   GenieACS shows it. Set `OPTICORE_AUTO_TREE_READ=false` to leave that to the
+   caller. A batch is a series of tasks with one `batch_id`
    and a sequence number; when one fails, the rest of the batch is cancelled.
 5. An empty reply ends the session.
 

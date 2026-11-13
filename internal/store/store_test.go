@@ -135,6 +135,9 @@ func TestBootstrapReplacesParamsAndClearsPendingReboot(t *testing.T) {
 	if err := s.SetPendingReboot(ctx, in.ID, true); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.MarkTreeRead(ctx, in.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	reset := sampleInform(at.Add(time.Minute))
 	reset.Bootstrap = true
@@ -155,6 +158,9 @@ func TestBootstrapReplacesParamsAndClearsPendingReboot(t *testing.T) {
 	}
 	if dev.PendingReboot {
 		t.Error("pending_reboot survived the bootstrap")
+	}
+	if dev.TreeReadAt != nil {
+		t.Error("tree_read_at survived the bootstrap")
 	}
 }
 
