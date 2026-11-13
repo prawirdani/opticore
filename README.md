@@ -299,36 +299,168 @@ the API queues.
 ## Go client
 
 `github.com/prawirdani/opticore/client` is a thin, standard-library-only
-client for the HTTP API and the hook. It adds no logic of its own.
+client for the HTTP API and the hook. It adds no logic of its own: every call
+is one request, and everything Opticore decides is decided by the daemon.
+
+### Install
+
+```sh
+go get github.com/prawirdani/opticore@v0.1.0
+```
+
+The module is versioned with the daemon. Point `go get` at the release the
+daemon runs, and import:
 
 ```go
-c, err := client.New("http://acs:8081", token)
-tasks, err := c.CreateTasks(ctx, "48575443BD7589AB", []client.Task{
-	client.Set(client.Value{Path: "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID", Value: "Home"}),
-	client.Ping("8.8.8.8", client.PingCount(4)),
-}, "order-1234") // Idempotency-Key, "" for none
+import "github.com/prawirdani/opticore/client"
+```
 
+It needs Go 1.26 or newer and pulls in no other module.
+
+### Connect
+
+```go
+c, err := client.New("http://acs.internal:8081", token)
+if err != nil {
+	return err
+}
+```
+
+`token` is an API token (`opticore token create provisioner --scope read,write`
+or `--scope read,write,reveal` if the code must read secrets). An empty token
+works only against a daemon started with `OPTICORE_API_AUTH=false` on loopback.
+The default `http.Client` has no timeout so a `Watch` can stay open; give every
+ordinary call a context deadline.
+
+`client.WithHTTPClient(hc)` replaces the HTTP client, for a private CA or a
+proxy.
+
+### Read
+
+```go
+page, err := c.ListDevices(ctx, client.ListDevicesOptions{ProductClass: "HG8145V5", Limit: 50})
+dev, err := c.GetDevice(ctx, "48575443BD7589AB", false) // id or serial; reveal=false
+params, err := c.ListParams(ctx, dev.ID, "InternetGatewayDevice.WANDevice.", false)
+tasks, err := c.ListTasks(ctx, dev.ID, client.ListTasksOptions{Status: "failed"})
+events, err := c.ListEvents(ctx, dev.ID, client.ListEventsOptions{Limit: 20})
+```
+
+A device id is `OUI-ProductClass-Serial`; a bare serial is accepted everywhere.
+`Param.Value` for a secret leaf is `••••` unless the call asks for `reveal` and
+the token carries that scope.
+
+### Write
+
+```go
+tasks, err := c.CreateTasks(ctx, dev.ID, []client.Task{
+	client.Set(
+		client.Value{Path: "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID", Value: "Home"},
+		client.Value{Path: "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase",
+			Value: "correct horse", Type: "xsd:string"},
+	),
+	client.Get("InternetGatewayDevice.DeviceInfo.SoftwareVersion"),
+}, "order-1234") // Idempotency-Key; "" for none
+```
+
+A call with several tasks is an ordered batch: they run in order inside one
+session. The `Idempotency-Key` is kept per device forever, so a retried request
+returns the original rows instead of queueing twice.
+
+Builders: `Get(paths...)` (no path reads every parameter under the device
+root), `Set(values...)`, `AddObject(path)`, `DeleteObject(path)`, `Reboot()`,
+`Reset()`, `Ping(host, opts...)` with `PingCount`, `PingTimeout`, `PingSize`
+and `PingInterface`.
+
+Creating tasks wakes the device. To poll one to its end:
+
+```go
+t, err := c.GetTask(ctx, tasks[0].ID, false)
+switch t.Status {
+case "done":   // t.Result holds the output
+case "failed": f := t.Fault()  // *client.Fault, nil unless a CWMP fault came back
+}
+```
+
+Other calls: `Wake`, `CancelTask`, `RevertTask(deviceID, taskID, idemKey)`.
+`RevertTask` queues a `set` that restores what a done `set` overwrote, using the
+`prev` the daemon recorded in that session.
+
+### Jobs
+
+```go
+job, err := c.CreateJob(ctx, client.JobSpec{
+	Name:        "reboot-olt3",
+	Task:        client.Reboot(),
+	Select:      client.JobSelector{ProductClass: "HG8145V5"},
+	MaxParallel: 10,
+})
+job, err = c.GetJob(ctx, job.ID)   // Status, Counts, Failures
+err = c.CancelJob(ctx, job.ID)     // pending tasks cancelled, running ones finish
+job, err = c.RevertJob(ctx, job.ID) // new job reverting the job's done sets
+```
+
+`Status` flips to `done` on the daemon's once-a-minute sweep; `Counts` is
+current on every read.
+
+### Watch
+
+```go
 events, errs := c.Watch(ctx, client.WatchFilter{Types: []string{"task", "job"}})
 for e := range events {
-	if e.Task != nil && e.Task.Fault() != nil {
-		log.Print(e.Task.Fault()) // *client.Fault: CWMP fault code and string
+	switch e.Kind {
+	case "task":
+		log.Println(e.Task.Status, e.Task.Fault())
+	case "job":
+		log.Println(e.Job.ID, e.Job.Status, e.Job.Counts)
+	default: // an Inform event type, e.g. "0 BOOTSTRAP"
+		log.Println(e.Kind, e.DeviceID, e.Detail)
 	}
 }
-if err := <-errs; err != nil { /* a *client.Error: 4xx other than 408/429 */ }
+if err := <-errs; err != nil { /* *client.Error: 4xx other than 408/429 */ }
+```
 
+`Types` takes Inform event types plus `task` and `job`; `DeviceID` narrows
+event and task frames, and job frames are aggregate so they are not sent when
+it is set. `Watch` reconnects on a dropped stream, a 5xx or a 429 with
+`Last-Event-ID` and backs off from 100 ms to 5 s; a 4xx other than 408 is
+terminal and arrives as one `*client.Error`. Cancelling `ctx` closes both
+channels. Set `LastEventID` to resume from a known point.
+
+### Hook
+
+The daemon POSTs a step to your provisioner during a live session; the SDK
+serves it and gives you typed tasks back:
+
+```go
 http.Handle("/hook", client.HookHandler(secret, func(ctx context.Context, s client.Step) ([]client.Task, error) {
-	if !client.Matches(s.Events, []string{"0 BOOTSTRAP"}) || s.Step > 1 {
-		return nil, nil // no tasks ends the hook
+	if !client.Matches(s.Events, []string{"0 BOOTSTRAP", "1 BOOT"}) || s.Step > 1 {
+		return nil, nil // an empty reply ends the hook
 	}
 	return []client.Task{client.Get("InternetGatewayDevice.DeviceInfo.")}, nil
 }))
 ```
 
-Builders: `Get`, `Set`, `AddObject`, `DeleteObject`, `Reboot`, `Reset`, `Ping`.
-API errors are `*client.Error{Status, Code, Message}`. `Watch` reconnects on a
-dropped stream, 5xx or 429 with `Last-Event-ID`, backing off from 100 ms to
-5 s; cancelling the context closes both channels. `HandlerFunc` is the hook
-handler with access to the opaque `state`.
+`secret` is `OPTICORE_HOOK_SECRET`. `s` carries the device identity, the Inform
+events, the Inform parameters, the prefetched parameters and, from step 2, the
+results of the previous step. `s.State` is whatever string you returned last
+time, so keep per-device state in your reply. Set `OPTICORE_HOOK_URL` to this
+endpoint and `OPTICORE_HOOK_EVENTS` to the events you want. Returning an error
+sends 500, which the daemon treats as "hook failed, session continues".
+`client.HandlerFunc` is the same handler with access to `state`.
+
+### Errors
+
+API errors are `*client.Error{Status, Code, Message}`, so match on the code:
+
+```go
+var ce *client.Error
+if errors.As(err, &ce) && ce.Code == "DEVICE_NOT_FOUND" {
+	// forget it
+}
+```
+
+A task that ended with a CWMP fault has `Task.Fault() *client.Fault` carrying
+`Code` and `String`, which are the device's own fault code and message.
 
 ## HTTP API
 
