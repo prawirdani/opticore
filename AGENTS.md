@@ -26,6 +26,10 @@ or `go test -race -count=1 ./internal/acs/` for one package. Each test binary
 creates its own PostgreSQL schema and drops it, so tests may share one database
 and run in parallel.
 
+`OPTICORE_LOG_FILE` in `.env` makes the daemon append JSON logs to a file;
+`opticore logs [-n N] [-f]` tails it and the TUI's fourth tab shows the same
+lines. Without it the daemon logs to stderr only.
+
 `.env` is gitignored and holds the dev DSN (local container `pg18.1`, databases
 `opticore` and `opticore_test`). Dev ports are `17547`/`18081` because a local
 GenieACS owns `7547`; the built-in defaults are still `7547`/`8081`.

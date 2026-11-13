@@ -52,6 +52,7 @@ type Config struct {
 	EventRetention  time.Duration
 
 	LogLevel string
+	LogFile  string // JSON log destination; empty means stderr
 }
 
 // ValidationError lists every problem found while loading configuration.
@@ -210,6 +211,7 @@ func Load(getenv func(string) string) (Config, error) {
 		TaskRetention:      l.dur("OPTICORE_TASK_RETENTION", 720*time.Hour),
 		EventRetention:     l.dur("OPTICORE_EVENT_RETENTION", 720*time.Hour),
 		LogLevel:           strings.ToLower(l.str("OPTICORE_LOG_LEVEL", "info")),
+		LogFile:            l.str("OPTICORE_LOG_FILE", ""),
 	}
 
 	if cfg.DBDSN == "" {
@@ -250,6 +252,7 @@ func LoadClient(getenv func(string) string) (Config, error) {
 	cfg := Config{
 		DBDSN:    l.str("OPTICORE_DB_DSN", ""),
 		LogLevel: strings.ToLower(l.str("OPTICORE_LOG_LEVEL", "info")),
+		LogFile:  l.str("OPTICORE_LOG_FILE", ""),
 		// Only the TUI needs this, for its wake action.
 		CWMPCRTimeout: l.dur("CWMP_CR_TIMEOUT", 2*time.Second),
 	}

@@ -197,6 +197,7 @@ unit, a container, or a one-off `FOO=1 opticore serve` behaves as written.
 | `OPTICORE_TASK_RETENTION` | `720h` | finished tasks older than this are deleted |
 | `OPTICORE_EVENT_RETENTION` | `720h` | events older than this are deleted |
 | `OPTICORE_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `OPTICORE_LOG_FILE` | empty | append JSON logs to this file instead of stderr, which is what `opticore logs` and the console's logs tab read |
 
 `OPTICORE_FILE_ADDR` and `OPTICORE_FIRMWARE_DIR` are read but unused: firmware
 transfer is not implemented yet.
@@ -366,6 +367,7 @@ opticore wake <serial|id>
 opticore token create <name> --scope read,write[,reveal]
 opticore version
 opticore tui                                   operator console (also the no-arg default)
+opticore logs [-n N] [-f]                      tail the daemon log file
 ```
 
 Every listing subcommand takes `--json`. The CLI connects to the database
@@ -375,7 +377,9 @@ directly and never applies DDL except `migrate`.
 
 `opticore tui` (or just `opticore`) opens the operator console when stdin and
 stdout are a terminal; a pipe gets the usage text instead. It reads the local
-database, never talks to a device, and refreshes only when asked.
+database and the daemon log, never talks to a device, and keeps itself current:
+the logs tab reloads every second, the other lists every five seconds, and a
+detail screen only on `r`. The last refresh time is always shown.
 
 | Key | Action |
 |---|---|
@@ -384,9 +388,10 @@ database, never talks to a device, and refreshes only when asked.
 | `Esc` | collapse a level, then back to the device list |
 | `/` | filter the rows: serial prefix, product class, version, freshness |
 | `s` | cycle the task status filter (tasks screen) |
-| `r` | refresh; the last refresh time is shown |
+| `r` | refresh now; the last refresh time is shown |
 | `w` | wake the selected device, after `y/n` |
-| `1 2 3`, `Tab` | devices, tasks, jobs |
+| `b` / `x` | reboot / factory reset the open device, after `y/n` |
+| `1 2 3 4`, `Tab` | devices, tasks, jobs, logs |
 | `q`, `Ctrl+C` | quit |
 
 Facts shown: serial, product class, software version, inform age (`fresh` within
@@ -395,6 +400,11 @@ whether connection-request credentials are set, cached parameters one level at
 a time, tasks with fault codes, events, and jobs with their per-device
 failures. Secrets never reach the screen: cached secret leaves are stored as a
 marker, so the console shows `••••`.
+
+The logs tab shows the daemon's own log, the same lines `opticore logs` prints,
+so it only has content when `OPTICORE_LOG_FILE` is set. Reboot and factory reset
+queue ordinary tasks through the same validation as the API, which also wakes
+the device.
 
 ## Security
 
@@ -431,8 +441,9 @@ marker, so the console shows `••••`.
   deletes finished tasks and events past their retention. Pending and running
   tasks are never deleted.
 - `GET /healthz` is served on both listeners.
-- Logs are JSON on stderr. `OPTICORE_LOG_LEVEL=debug` adds the auth challenge
-  and hook step detail.
+- Logs are JSON on stderr. `OPTICORE_LOG_FILE` appends them to a 0600 file
+  instead, which `opticore logs [-n N] [-f]` and the console's logs tab read.
+  `OPTICORE_LOG_LEVEL=debug` adds the auth challenge and hook step detail.
 
 ## Development
 
@@ -471,7 +482,7 @@ These come before the `v0.1.0` tag:
 - `token list` and `token revoke`.
 - Job transitions on SSE, and creating a job from the CLI.
 - The public Go SDK in `client/`; the hook handler is `internal/hook` for now.
-- Revealing a secret from the console, and creating tasks or jobs from it.
+- Revealing a secret from the console, and creating jobs from it.
 
 Out of scope on purpose: `ScheduleInform`, `ScheduleDownload`, `Upload`,
 parameter attributes and notification flags, TLS on the CWMP port, clustering,

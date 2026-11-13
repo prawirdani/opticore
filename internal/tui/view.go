@@ -45,6 +45,8 @@ func (m model) body(h int) []string {
 		return m.jobsBody(h)
 	case scrJob:
 		return m.jobBody(h)
+	case scrLogs:
+		return m.logsBody(h)
 	}
 	return m.devicesBody(h)
 }
@@ -62,6 +64,7 @@ func (m model) tabLine() string {
 		{"1", scrDevices, "devices"},
 		{"2", scrTasks, "tasks"},
 		{"3", scrJobs, "jobs"},
+		{"4", scrLogs, "logs"},
 	} {
 		if i > 0 {
 			b.WriteString("  ")
@@ -101,6 +104,12 @@ func (m model) contextLine() string {
 		s = fmt.Sprintf("%d jobs  ·  refreshed %s", len(m.jobs.all), clock(m.jobs.at))
 	case scrJob:
 		s = fmt.Sprintf("job %d  ·  refreshed %s", m.jobd.job.ID, clock(m.jobd.at))
+	case scrLogs:
+		s = fmt.Sprintf("%d lines", len(m.logs.all))
+		if len(m.logs.view) != len(m.logs.all) {
+			s += fmt.Sprintf("  ·  %d shown", len(m.logs.view))
+		}
+		s += "  ·  refreshed " + clock(m.logs.at)
 	default:
 		s = fmt.Sprintf("%d devices", len(m.dev.all))
 		if len(m.dev.view) != len(m.dev.all) {
@@ -142,15 +151,17 @@ func (m model) helpLine() string {
 	var s string
 	switch m.screen {
 	case scrDevice:
-		s = "↑↓ move  ·  enter expand  ·  esc back  ·  w wake  ·  b reboot  ·  x reset  ·  r refresh  ·  q quit"
+		s = "↑↓ move  ·  enter expand  ·  esc back  ·  w wake  ·  b reboot  ·  x reset  ·  r refresh now  ·  q quit"
 	case scrTasks:
-		s = "↑↓ move  ·  s status  ·  / filter  ·  esc back  ·  r refresh  ·  1/2/3 screens  ·  q quit"
+		s = "↑↓ move  ·  s status  ·  / filter  ·  esc back  ·  r refresh now  ·  1/2/3/4 screens  ·  q quit"
 	case scrJobs:
-		s = "↑↓ move  ·  enter open  ·  / filter  ·  r refresh  ·  1/2/3 screens  ·  q quit"
+		s = "↑↓ move  ·  enter open  ·  / filter  ·  r refresh now  ·  1/2/3/4 screens  ·  q quit"
 	case scrJob:
-		s = "↑↓ move  ·  esc back  ·  r refresh  ·  q quit"
+		s = "↑↓ move  ·  esc back  ·  r refresh now  ·  q quit"
+	case scrLogs:
+		s = "↑↓ move  ·  / filter  ·  r refresh now  ·  1/2/3/4 screens  ·  q quit"
 	default:
-		s = "↑↓ move  ·  enter open  ·  / filter  ·  w wake  ·  r refresh  ·  1/2/3 screens  ·  q quit"
+		s = "↑↓ move  ·  enter open  ·  / filter  ·  w wake  ·  r refresh now  ·  1/2/3/4 screens  ·  q quit"
 	}
 	return clip(stMuted.Render(s), m.w)
 }

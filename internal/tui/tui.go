@@ -29,6 +29,9 @@ type Deps struct {
 	// also wakes the device when the task is due now. The console never writes
 	// a task row itself.
 	Enqueue func(ctx context.Context, idOrSerial string, tasks []store.NewTask) ([]store.Task, error)
+	// Logs returns the newest n daemon log lines, oldest first as written.
+	// The console parses them; it never reads a log file itself.
+	Logs func(ctx context.Context, n int) ([]string, error)
 }
 
 // DeviceReader lists devices newest-inform first and reads one by id or

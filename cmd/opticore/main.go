@@ -2,11 +2,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -49,6 +51,7 @@ const usage = `usage: opticore [-env-file path] <command> [args]
   job <id> [--json]
   job cancel <id>
   wake <serial|id>
+  logs [-n N] [-f]                      tail the daemon log (OPTICORE_LOG_FILE)
   token create <name> --scope read,write[,reveal]
   version                               print the build version
 `
@@ -94,6 +97,8 @@ func main() {
 		err = cmdJob(ctx, args)
 	case "wake":
 		err = cmdWake(ctx, args)
+	case "logs":
+		err = cmdLogs(ctx, args)
 	case "token":
 		err = cmdToken(ctx, args)
 	case "version":
@@ -138,10 +143,21 @@ func splitEnvFile(args []string) (rest []string, path string, err error) {
 	return rest, path, nil
 }
 
-func newLogger(level string) *slog.Logger {
+// newLogger returns the JSON logger and a close func. An empty path keeps the
+// logs on stderr, which is what a container or systemd unit wants; a path
+// appends to a 0600 file so `opticore logs` and the TUI can read it.
+func newLogger(level, path string) (*slog.Logger, func(), error) {
 	var l slog.Level
 	_ = l.UnmarshalText([]byte(level))
-	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: l}))
+	opts := &slog.HandlerOptions{Level: l}
+	if path == "" {
+		return slog.New(slog.NewJSONHandler(os.Stderr, opts)), func() {}, nil
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, nil, fmt.Errorf("log file %s: %w", path, err)
+	}
+	return slog.New(slog.NewJSONHandler(f, opts)), func() { f.Close() }, nil
 }
 
 func serve(ctx context.Context) error {
@@ -149,7 +165,11 @@ func serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log := newLogger(cfg.LogLevel)
+	log, closeLog, err := newLogger(cfg.LogLevel, cfg.LogFile)
+	if err != nil {
+		return err
+	}
+	defer closeLog()
 
 	st, err := store.Open(ctx, cfg.DBDSN)
 	if err != nil {
@@ -311,17 +331,94 @@ func janitor(ctx context.Context, st *store.Store, svc *acs.Service, log *slog.L
 	}
 }
 
+// cmdLogs prints the daemon log file, or follows it with -f. The daemon writes
+// there only when OPTICORE_LOG_FILE is set; stderr stays the default.
+func cmdLogs(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
+	n := fs.Int("n", 100, "number of lines to show")
+	follow := fs.Bool("f", false, "follow new lines")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: logs [-n N] [-f]")
+	}
+	path := strings.TrimSpace(os.Getenv("OPTICORE_LOG_FILE"))
+	if path == "" {
+		return errors.New("no log file: set OPTICORE_LOG_FILE so the daemon appends its JSON logs there")
+	}
+	lines, err := tailLines(path, *n)
+	if err != nil {
+		return err
+	}
+	for _, l := range lines {
+		fmt.Println(l)
+	}
+	if !*follow {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Seek(0, io.SeekEnd); err != nil {
+		return err
+	}
+	r := bufio.NewReader(f)
+	for {
+		line, err := r.ReadString('\n')
+		if line != "" {
+			fmt.Print(line)
+		}
+		switch {
+		case err == nil:
+		case errors.Is(err, io.EOF):
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(400 * time.Millisecond):
+			}
+		default:
+			return err
+		}
+	}
+}
+
+// tailLines returns the last n lines of path. shortcut: it reads the whole
+// file; a log rotated at a gigabyte wants a seek from the end.
+func tailLines(path string, n int) ([]string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("log file %s: %w", path, err)
+	}
+	text := strings.TrimRight(string(b), "\n")
+	if text == "" {
+		return nil, nil
+	}
+	lines := strings.Split(text, "\n")
+	if n > 0 && len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines, nil
+}
+
 // cmdTUI runs the operator console. Its one write, a wake, goes through
 // acs.Service so credential self-heal and validation stay in one place.
 func cmdTUI(ctx context.Context) error {
 	return withStore(ctx, func(st *store.Store, cfg config.Config) error {
-		log := newLogger(cfg.LogLevel)
-		svc := &acs.Service{Store: st, Key: cfg.SecretKey, Waker: wake.New(cfg.CWMPCRTimeout, log), Logger: log}
+		svc := service(st, cfg)
 		return tui.Run(ctx, tui.Deps{
 			Devices: st, Tasks: st, Jobs: st, Events: st,
 			Params:  tuiParams{st: st},
 			Wake:    svc.Wake,
 			Enqueue: svc.Enqueue,
+			Logs: func(ctx context.Context, n int) ([]string, error) {
+				if cfg.LogFile == "" {
+					return nil, errors.New("no log file: set OPTICORE_LOG_FILE so the daemon writes one")
+				}
+				return tailLines(cfg.LogFile, n)
+			},
 		})
 	})
 }
@@ -369,8 +466,9 @@ func withStore(ctx context.Context, fn func(*store.Store, config.Config) error) 
 }
 
 func service(st *store.Store, cfg config.Config) *acs.Service {
-	log := newLogger(cfg.LogLevel)
-	return &acs.Service{Store: st, Key: cfg.SecretKey, Waker: wake.New(2*time.Second, log), Logger: log}
+	log, _, _ := newLogger(cfg.LogLevel, "") // stderr: never fails
+	return &acs.Service{Store: st, Key: cfg.SecretKey,
+		Waker: wake.New(cfg.CWMPCRTimeout, log), Logger: log}
 }
 
 func printJSON(v any) error {
