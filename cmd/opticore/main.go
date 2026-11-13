@@ -24,6 +24,7 @@ import (
 	"github.com/prawirdani/opticore/internal/cwmp"
 	"github.com/prawirdani/opticore/internal/hook"
 	"github.com/prawirdani/opticore/internal/store"
+	"github.com/prawirdani/opticore/internal/tui"
 	"github.com/prawirdani/opticore/internal/wake"
 )
 
@@ -37,10 +38,11 @@ const usage = `usage: opticore [-env-file path] <command> [args]
 
   serve                                 run the daemon
   migrate                               apply database migrations
+  tui                                   operator console (also the no-arg default)
   devices [--json] [--serial P] [--class C]
   device <serial|id> [--json] [--prefix P]
   tasks <serial|id> [--json]
-  task <serial|id> get <path>...
+  task <serial|id> get [path]...        no path: every parameter
   task <serial|id> set <path> <value> [type]
   task <serial|id> reboot
   jobs [--json]
@@ -62,8 +64,11 @@ func main() {
 		os.Exit(1)
 	}
 	if len(args) < 1 {
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+		if !isTerminal() {
+			fmt.Fprint(os.Stderr, usage)
+			os.Exit(2)
+		}
+		args = []string{"tui"}
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -73,6 +78,8 @@ func main() {
 		err = serve(ctx)
 	case "migrate":
 		err = withStore(ctx, func(s *store.Store, _ config.Config) error { return s.Migrate(ctx) })
+	case "tui":
+		err = cmdTUI(ctx)
 	case "devices":
 		err = cmdDevices(ctx, args)
 	case "device":
@@ -304,6 +311,49 @@ func janitor(ctx context.Context, st *store.Store, svc *acs.Service, log *slog.L
 	}
 }
 
+// cmdTUI runs the operator console. Its one write, a wake, goes through
+// acs.Service so credential self-heal and validation stay in one place.
+func cmdTUI(ctx context.Context) error {
+	return withStore(ctx, func(st *store.Store, cfg config.Config) error {
+		log := newLogger(cfg.LogLevel)
+		svc := &acs.Service{Store: st, Key: cfg.SecretKey, Waker: wake.New(cfg.CWMPCRTimeout, log), Logger: log}
+		return tui.Run(ctx, tui.Deps{
+			Devices: st, Tasks: st, Jobs: st, Events: st,
+			Params: tuiParams{st: st},
+			Wake:   svc.Wake,
+		})
+	})
+}
+
+// tuiParams adapts the cached parameter map: the store has no prefix query.
+type tuiParams struct{ st *store.Store }
+
+func (p tuiParams) Params(ctx context.Context, idOrSerial, prefix string) (map[string]store.Param, error) {
+	d, err := p.st.GetDevice(ctx, idOrSerial)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]store.Param, len(d.Params))
+	for path, v := range d.Params {
+		if strings.HasPrefix(path, prefix) {
+			out[path] = v
+		}
+	}
+	return out, nil
+}
+
+// isTerminal reports whether both stdin and stdout are a terminal, which the
+// console needs; a pipe gets the usage text instead.
+func isTerminal() bool {
+	for _, f := range []*os.File{os.Stdin, os.Stdout} {
+		fi, err := f.Stat()
+		if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func withStore(ctx context.Context, fn func(*store.Store, config.Config) error) error {
 	cfg, err := config.LoadClient(os.Getenv)
 	if err != nil {
@@ -467,15 +517,13 @@ func cmdTasks(ctx context.Context, args []string) error {
 
 func cmdTask(ctx context.Context, args []string) error {
 	if len(args) < 2 {
-		return errors.New("usage: task <serial|id> get <path>... | set <path> <value> [type] | reboot")
+		return errors.New("usage: task <serial|id> get [path]... | set <path> <value> [type] | reboot")
 	}
 	dev, name, rest := args[0], args[1], args[2:]
 	var t store.NewTask
 	switch name {
 	case "get":
-		if len(rest) == 0 {
-			return errors.New("usage: task <serial|id> get <path>...")
-		}
+		// No paths reads every parameter under the device's root.
 		t = store.NewTask{Name: "get", Args: mustJSON(acs.GetArgs{Paths: rest})}
 	case "set":
 		if len(rest) < 2 || len(rest) > 3 {

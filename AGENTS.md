@@ -39,6 +39,9 @@ GenieACS owns `7547`; the built-in defaults are still `7547`/`8081`.
 - `internal/hook` — provisioner client and the server-side handler helper.
 - `internal/api` — `/v1` handlers, SSE, tokens.
 - `internal/store` — hand-written SQL, secret sealing, migrations runner.
+- `internal/tui` — operator console over `Deps` interfaces; no SQL of its own,
+  writes go through `acs.Service`. Its tests are pure (fake readers), so they
+  run under plain `make test`.
 - `migrations` — embedded goose SQL. Add `00004_*.sql` and up/down; `serve` and
   `migrate` apply them, no other command runs DDL.
 

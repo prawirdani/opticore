@@ -250,6 +250,8 @@ func LoadClient(getenv func(string) string) (Config, error) {
 	cfg := Config{
 		DBDSN:    l.str("OPTICORE_DB_DSN", ""),
 		LogLevel: strings.ToLower(l.str("OPTICORE_LOG_LEVEL", "info")),
+		// Only the TUI needs this, for its wake action.
+		CWMPCRTimeout: l.dur("CWMP_CR_TIMEOUT", 2*time.Second),
 	}
 	if cfg.DBDSN == "" {
 		l.fail("OPTICORE_DB_DSN is required")

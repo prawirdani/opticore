@@ -232,7 +232,7 @@ batch). `args` by name:
 
 | Task | Args |
 |---|---|
-| `get` | `{"paths": ["InternetGatewayDevice.DeviceInfo."]}` — exact names or a subtree ending in `.` |
+| `get` | `{"paths": ["InternetGatewayDevice.DeviceInfo."]}` — exact names or a subtree ending in `.`. Omit `paths` (or send `[]`) to read every parameter under the device's root in one `GetParameterValues` |
 | `set` | `{"values": [["path", "value", "xsd:string"]]}` — leaves only; the type may be omitted |
 | `add_object` | `{"path": "InternetGatewayDevice.X."}` — result carries the new instance number |
 | `delete_object` | `{"path": "InternetGatewayDevice.X.3."}` |
@@ -358,17 +358,43 @@ opticore migrate                               apply migrations
 opticore devices [--serial P] [--class C]      list devices
 opticore device <serial|id> [--prefix P]       one device and its parameters
 opticore tasks <serial|id>                     task log
-opticore task <serial|id> get <path>...
+opticore task <serial|id> get [path]...        no path: every parameter
 opticore task <serial|id> set <path> <value> [type]
 opticore task <serial|id> reboot
 opticore jobs | job <id> | job cancel <id>
 opticore wake <serial|id>
 opticore token create <name> --scope read,write[,reveal]
 opticore version
+opticore tui                                   operator console (also the no-arg default)
 ```
 
 Every listing subcommand takes `--json`. The CLI connects to the database
 directly and never applies DDL except `migrate`.
+
+## Console
+
+`opticore tui` (or just `opticore`) opens the operator console when stdin and
+stdout are a terminal; a pipe gets the usage text instead. It reads the local
+database, never talks to a device, and refreshes only when asked.
+
+| Key | Action |
+|---|---|
+| `↑ ↓` / `j k`, `g G` | move, jump to ends |
+| `Enter` | open a device or job; expand one parameter level |
+| `Esc` | collapse a level, then back to the device list |
+| `/` | filter the rows: serial prefix, product class, version, freshness |
+| `s` | cycle the task status filter (tasks screen) |
+| `r` | refresh; the last refresh time is shown |
+| `w` | wake the selected device, after `y/n` |
+| `1 2 3`, `Tab` | devices, tasks, jobs |
+| `q`, `Ctrl+C` | quit |
+
+Facts shown: serial, product class, software version, inform age (`fresh` within
+two inform intervals, `stale` within six, `offline` beyond), last address,
+whether connection-request credentials are set, cached parameters one level at
+a time, tasks with fault codes, events, and jobs with their per-device
+failures. Secrets never reach the screen: cached secret leaves are stored as a
+marker, so the console shows `••••`.
 
 ## Security
 
@@ -445,7 +471,7 @@ These come before the `v0.1.0` tag:
 - `token list` and `token revoke`.
 - Job transitions on SSE, and creating a job from the CLI.
 - The public Go SDK in `client/`; the hook handler is `internal/hook` for now.
-- The TUI.
+- Revealing a secret from the console, and creating tasks or jobs from it.
 
 Out of scope on purpose: `ScheduleInform`, `ScheduleDownload`, `Upload`,
 parameter attributes and notification flags, TLS on the CWMP port, clustering,
