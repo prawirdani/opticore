@@ -71,6 +71,15 @@ func paramValue(p store.Param) string {
 	return p.Value
 }
 
+// detailFocus is which of the three detail panes owns the arrow keys.
+type detailFocus int
+
+const (
+	focusParams detailFocus = iota
+	focusTasks
+	focusEvents
+)
+
 type detailPane struct {
 	device   store.Device
 	pages    map[string]paramPage
@@ -78,7 +87,10 @@ type detailPane struct {
 	rows     []paramRow
 	cur      cursor
 	tasks    []store.Task
+	taskCur  cursor
 	events   []store.Event
+	eventCur cursor
+	focus    detailFocus
 	at       time.Time
 
 	// all and paths are the whole cached parameter set from the first read.
@@ -124,6 +136,11 @@ func (d *detailPane) resetTree() {
 	d.expanded = map[string]bool{}
 	d.rows = nil
 	d.cur.clamp(0)
+}
+
+// cycleFocus moves the focus ring one pane forward or back, wrapping.
+func (d *detailPane) cycleFocus(dir int) {
+	d.focus = detailFocus((int(d.focus) + dir + 3) % 3)
 }
 
 // filtering reports whether a parameter search is narrowing the tree.
@@ -295,38 +312,135 @@ func (m model) detailBody(h int) []string {
 	out := m.detailHeader()
 	out = append(out, "")
 
-	tail := append(m.detailTasks(), m.detailEvents()...)
-	// The tree keeps at least a few rows; the task and event blocks are
-	// dropped whole on a short terminal instead of squeezing the tree.
-	if len(out)+1+3+len(tail) > h {
-		tail = nil
+	// Three pane headers, then the rows the rest of the body can hold. The
+	// split grows with the terminal, so a tall screen shows more of each list.
+	avail := h - len(out) - 3
+	if avail < 3 {
+		avail = 3
 	}
-	rowsH := h - len(out) - 1 - len(tail)
-	if rowsH < 1 {
-		rowsH = 1
-	}
+	paramsH, tasksH, eventsH := paneHeights(avail)
+	out = append(out, m.paramsPane(paramsH)...)
+	out = append(out, m.taskPane(tasksH)...)
+	return append(out, m.eventPane(eventsH)...)
+}
 
+// paneHeights splits the rows left after the three pane headers: one row each
+// to start, a quarter more for each list, and the tree takes the rest.
+func paneHeights(avail int) (params, tasks, events int) {
+	if avail < 3 {
+		avail = 3
+	}
+	list := (avail - 3) / 4
+	if list < 2 && avail >= 9 {
+		list = 2
+	}
+	if list < 1 {
+		list = 1
+	}
+	if max := (avail - 1) / 2; list > max {
+		list = max
+	}
+	tasks, events = 1+list, 1+list
+	params = avail - tasks - events
+	if params < 1 {
+		params = 1
+	}
+	return params, tasks, events
+}
+
+// paneHeader marks the focused pane with a triangle and bold text, and dims
+// the others, so focus survives a monochrome terminal.
+func (m model) paneHeader(title string, pos, total int, focused bool) string {
+	if total > 0 {
+		title = fmt.Sprintf("%s  %d of %d", title, pos+1, total)
+	} else {
+		title += "  0 of 0"
+	}
+	return m.paneHeaderText(title, focused)
+}
+
+func (m model) paneHeaderText(title string, focused bool) string {
+	if focused {
+		return stHead.Render("▸ " + title)
+	}
+	return stMuted.Render("  " + title)
+}
+
+func (m model) paramsPane(h int) []string {
+	d := &m.det
 	title := "PARAMETERS"
 	if d.filtering() {
 		title = fmt.Sprintf("PARAMETERS  %d of %d  /%s", d.matches, len(d.paths), strings.TrimSpace(d.filter.text))
 	}
-	out = append(out, stHead.Render(title))
+	out := []string{m.paneHeaderText(title, d.focus == focusParams)}
 	switch {
 	case len(d.pages) == 0:
-		out = append(out, stMuted.Render(" loading…"))
+		return append(out, stMuted.Render("  loading…"))
 	case d.filtering() && len(d.paths) == 0:
-		out = append(out, stMuted.Render(" no cached parameters to search; the next Inform fills them"))
+		return append(out, stMuted.Render("  no cached parameters to search; the next Inform fills them"))
 	case d.filtering() && d.matches == 0:
-		out = append(out, stMuted.Render(fmt.Sprintf(" no parameter matches %q; esc clears the filter", strings.TrimSpace(d.filter.text))))
+		return append(out, stMuted.Render(fmt.Sprintf("  no parameter matches %q; esc clears the filter", strings.TrimSpace(d.filter.text))))
 	case len(d.rows) == 0:
-		out = append(out, stMuted.Render(" no cached parameters; the next Inform fills them"))
-	default:
-		start, end := d.cur.window(len(d.rows), rowsH)
-		for i := start; i < end; i++ {
-			out = append(out, m.paramLine(d.rows[i], i == d.cur.pos))
-		}
+		return append(out, stMuted.Render("  no cached parameters; the next Inform fills them"))
 	}
-	return append(out, tail...)
+	start, end := d.cur.window(len(d.rows), h)
+	for i := start; i < end; i++ {
+		out = append(out, m.paramLine(d.rows[i], d.focus == focusParams && i == d.cur.pos))
+	}
+	return out
+}
+
+func (m model) taskPane(h int) []string {
+	d := &m.det
+	out := []string{m.paneHeader("TASKS", d.taskCur.pos, len(d.tasks), d.focus == focusTasks)}
+	if len(d.tasks) == 0 {
+		return append(out, stMuted.Render("  none for this device"))
+	}
+	now := m.now()
+	start, end := d.taskCur.window(len(d.tasks), h)
+	for i := start; i < end; i++ {
+		t := d.tasks[i]
+		selected := d.focus == focusTasks && i == d.taskCur.pos
+		marker := "  "
+		if selected {
+			marker = "› "
+		}
+		line := fmt.Sprintf("%s#%d %s %s %s", marker, t.ID, t.Name, t.Status, age(now.Sub(t.UpdatedAt)))
+		if f := taskFault(t); f != "-" {
+			line += "  " + f
+		}
+		line = clip(line, m.w)
+		if selected {
+			line = stSel.Render(cell(line, m.w))
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+func (m model) eventPane(h int) []string {
+	d := &m.det
+	out := []string{m.paneHeader("EVENTS", d.eventCur.pos, len(d.events), d.focus == focusEvents)}
+	if len(d.events) == 0 {
+		return append(out, stMuted.Render("  none for this device"))
+	}
+	now := m.now()
+	start, end := d.eventCur.window(len(d.events), h)
+	for i := start; i < end; i++ {
+		e := d.events[i]
+		selected := d.focus == focusEvents && i == d.eventCur.pos
+		marker := "  "
+		if selected {
+			marker = "› "
+		}
+		line := fmt.Sprintf("%s%s ago  %s  %s", marker, age(now.Sub(e.At)), e.Type, string(e.Detail))
+		line = clip(line, m.w)
+		if selected {
+			line = stSel.Render(cell(line, m.w))
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 // factRows is the device header, one fact per row. Keeping the pairs apart
@@ -512,41 +626,6 @@ func (m model) paramLine(r paramRow, sel bool) string {
 		return stSel.Render(cell(line, m.w))
 	}
 	return line
-}
-
-func (m model) detailTasks() []string {
-	now := m.now()
-	out := []string{"", stHead.Render("TASKS")}
-	if len(m.det.tasks) == 0 {
-		return append(out, stMuted.Render("  none for this device"))
-	}
-	for i, t := range m.det.tasks {
-		if i >= 3 {
-			break
-		}
-		line := fmt.Sprintf("  #%d %s %s %s ago", t.ID, t.Name, t.Status, age(now.Sub(t.UpdatedAt)))
-		if f := taskFault(t); f != "-" {
-			line += "  " + f
-		}
-		out = append(out, clip(line, m.w))
-	}
-	return out
-}
-
-func (m model) detailEvents() []string {
-	now := m.now()
-	out := []string{"", stHead.Render("EVENTS")}
-	if len(m.det.events) == 0 {
-		return append(out, stMuted.Render("  none for this device"))
-	}
-	for i, e := range m.det.events {
-		if i >= 3 {
-			break
-		}
-		line := fmt.Sprintf("  %s ago  %s  %s", age(now.Sub(e.At)), e.Type, string(e.Detail))
-		out = append(out, clip(line, m.w))
-	}
-	return out
 }
 
 func taskFault(t store.Task) string {

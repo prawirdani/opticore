@@ -25,7 +25,7 @@ const (
 const (
 	deviceLimit = 200
 	taskLimit   = 200
-	eventLimit  = 10
+	eventLimit  = 50
 	jobLimit    = 50
 	detailTaskN = 20
 
@@ -166,7 +166,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.det.device = msg.device
 		}
 		m.det.tasks = msg.tasks
+		m.det.taskCur.clamp(len(msg.tasks))
 		m.det.events = msg.events
+		m.det.eventCur.clamp(len(msg.events))
 		if msg.params != nil {
 			m.det.takeCache(msg.params)
 			m.det.pages[""] = buildPage(msg.params, "")
@@ -241,6 +243,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.det.tasks = msg.rows
+		m.det.taskCur.clamp(len(msg.rows))
 		return m, nil
 	}
 	return m, nil
@@ -274,14 +277,25 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "3":
 		return m, m.switchTo(scrJobs)
 	case "tab":
+		if m.screen == scrDevice {
+			m.det.cycleFocus(1)
+			return m, nil
+		}
 		return m, m.switchTo(m.nextTab(1))
 	case "shift+tab":
+		if m.screen == scrDevice {
+			m.det.cycleFocus(-1)
+			return m, nil
+		}
 		return m, m.switchTo(m.nextTab(-1))
 	case "r":
 		m.status, m.statusBad = "", false
 		return m, tea.Batch(m.refresh(), m.checkServing())
 	case "/":
 		if f := m.activeFilter(); f != nil {
+			if m.screen == scrDevice {
+				m.det.focus = focusParams
+			}
 			f.begin()
 		}
 		return m, nil
@@ -416,7 +430,14 @@ func (m *model) moveCursor(delta int) {
 	case scrJobs:
 		m.jobs.cur.move(delta, len(m.jobs.view))
 	case scrDevice:
-		m.det.cur.move(delta, len(m.det.rows))
+		switch m.det.focus {
+		case focusTasks:
+			m.det.taskCur.move(delta, len(m.det.tasks))
+		case focusEvents:
+			m.det.eventCur.move(delta, len(m.det.events))
+		default:
+			m.det.cur.move(delta, len(m.det.rows))
+		}
 	case scrJob:
 		m.jobd.cur.move(delta, len(m.jobd.failures))
 	}
@@ -538,8 +559,8 @@ func (m *model) openJob() tea.Cmd {
 }
 
 func (m *model) detailToggle() tea.Cmd {
-	if m.det.filtering() {
-		return nil // the search tree is already fully open
+	if m.det.focus != focusParams || m.det.filtering() {
+		return nil // only the tree expands; the search tree is already open
 	}
 	row, ok := m.det.selectedRow()
 	if !ok || !row.object {
@@ -651,6 +672,10 @@ func queuedStatus(verb string, tasks []store.Task) string {
 func (m *model) back() tea.Cmd {
 	switch m.screen {
 	case scrDevice:
+		if m.det.focus != focusParams {
+			m.det.focus = focusParams
+			return nil
+		}
 		if m.det.filtering() || m.det.filter.text != "" {
 			m.det.filter.text = ""
 			m.det.filter.editing = false

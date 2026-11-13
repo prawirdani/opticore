@@ -754,12 +754,16 @@ func TestConfirmBlocksOtherKeys(t *testing.T) {
 		t.Fatal("no confirmation to test")
 	}
 
-	for _, k := range []tea.KeyMsg{typed("b"), typed("x"), typed("w")} {
+	for _, k := range []tea.KeyMsg{typed("b"), typed("x"), typed("w"), keyTab, keyShiftTab} {
 		m = press(t, m, k)
 	}
 	m = press(t, m, keyDown)
 	m = press(t, m, keyEnter)
 	m = press(t, m, typed("r"))
+	m = press(t, m, typed("/"))
+	if m.det.focus != focusParams {
+		t.Fatalf("a key moved the pane focus during a confirmation: %v", m.det.focus)
+	}
 	if m.confirm == nil {
 		t.Fatal("a non-y/n key closed the confirmation")
 	}
@@ -1360,5 +1364,187 @@ func TestDetailParamFilterKeepsSelectionWhenVisible(t *testing.T) {
 	}
 	if row, ok := m.det.selectedRow(); !ok || row.prefix != ssid {
 		t.Fatalf("clearing the filter lost the visible selection: %+v", row)
+	}
+}
+
+var (
+	keyTab      = tea.KeyMsg{Type: tea.KeyTab}
+	keyShiftTab = tea.KeyMsg{Type: tea.KeyShiftTab}
+)
+
+// detailFixture opens the detail screen with n tasks and n events.
+func detailFixture(t *testing.T, tasks, events int) (*fake, model) {
+	t.Helper()
+	dev := device(1)
+	f := &fake{devices: []store.Device{dev}}
+	for i := 1; i <= tasks; i++ {
+		f.tasks = append(f.tasks, store.Task{ID: int64(i), DeviceID: dev.ID, Name: "set",
+			Status: "failed", Attempts: 2, FaultCode: intp(9003), Fault: "Invalid arguments",
+			UpdatedAt: testNow.Add(-time.Duration(i) * time.Minute)})
+	}
+	for i := 0; i < events; i++ {
+		f.events = append(f.events, store.Event{ID: int64(i + 1), DeviceID: dev.ID,
+			At: testNow.Add(-time.Duration(i) * time.Minute), Type: "periodic",
+			Detail: []byte(`{"codes":["2 PERIODIC"]}`)})
+	}
+	m := newTestModel(f)
+	m.w, m.h = 120, 40
+	m = settle(t, m, m.Init()())
+	return f, press(t, m, keyEnter)
+}
+
+func TestDetailFocusCyclesAndWraps(t *testing.T) {
+	_, m := detailFixture(t, 2, 2)
+	if m.det.focus != focusParams {
+		t.Fatalf("initial focus: %v", m.det.focus)
+	}
+	steps := []struct {
+		key  tea.KeyMsg
+		want detailFocus
+	}{
+		{keyTab, focusTasks},
+		{keyTab, focusEvents},
+		{keyTab, focusParams},
+		{keyShiftTab, focusEvents},
+		{keyShiftTab, focusTasks},
+		{keyShiftTab, focusParams},
+	}
+	for _, step := range steps {
+		m = press(t, m, step.key)
+		if m.det.focus != step.want {
+			t.Fatalf("%v: focus %v, want %v", step.key, m.det.focus, step.want)
+		}
+	}
+	if !strings.Contains(stripANSI(m.View()), "▸ PARAMETERS") {
+		t.Fatalf("focused pane is not marked:\n%s", m.View())
+	}
+}
+
+func TestDetailPaneCursorsIndependent(t *testing.T) {
+	_, m := detailFixture(t, 20, 10)
+	m = press(t, m, keyTab) // tasks
+	for i := 0; i < 3; i++ {
+		m = press(t, m, keyDown)
+	}
+	m = press(t, m, keyTab) // events
+	m = press(t, m, keyDown)
+	m = press(t, m, keyShiftTab) // back to tasks
+	if m.det.taskCur.pos != 3 {
+		t.Fatalf("task cursor reset: %d", m.det.taskCur.pos)
+	}
+	if m.det.eventCur.pos != 1 {
+		t.Fatalf("event cursor: %d", m.det.eventCur.pos)
+	}
+	m = press(t, m, keyTab) // events again
+	if m.det.eventCur.pos != 1 {
+		t.Fatalf("event cursor lost on return: %d", m.det.eventCur.pos)
+	}
+}
+
+func TestDetailTaskListScrollsToLastRow(t *testing.T) {
+	_, m := detailFixture(t, 20, 10)
+	m = press(t, m, keyTab)
+	m = press(t, m, typed("G"))
+	if m.det.taskCur.pos != 19 {
+		t.Fatalf("cursor after G: %d", m.det.taskCur.pos)
+	}
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "TASKS  20 of 20") {
+		t.Fatalf("task header does not show the position:\n%s", view)
+	}
+	if !strings.Contains(view, "#20 set failed") {
+		t.Fatalf("last task row not rendered:\n%s", view)
+	}
+}
+
+func countTaskRows(lines []string) int {
+	n := 0
+	for _, line := range lines {
+		if strings.HasPrefix(line, "  #") || strings.HasPrefix(line, "› #") {
+			n++
+		}
+	}
+	return n
+}
+
+func TestDetailPaneRowsGrowWithHeight(t *testing.T) {
+	f, _ := detailFixture(t, 20, 10)
+	render := func(h int) int {
+		m := newTestModel(f)
+		m.w, m.h = 120, h
+		m = settle(t, m, m.Init()())
+		m = press(t, m, keyEnter)
+		return countTaskRows(viewLines(m))
+	}
+	short, tall := render(30), render(46)
+	if short < 2 {
+		t.Fatalf("only %d task rows at 30 lines", short)
+	}
+	if tall <= short {
+		t.Fatalf("rows did not grow with the terminal: %d at 46, %d at 30", tall, short)
+	}
+
+	// Never more rows than were loaded.
+	f2, _ := detailFixture(t, 2, 1)
+	m := newTestModel(f2)
+	m.w, m.h = 120, 46
+	m = settle(t, m, m.Init()())
+	m = press(t, m, keyEnter)
+	if got := countTaskRows(viewLines(m)); got > 2 {
+		t.Fatalf("rendered %d task rows for 2 tasks", got)
+	}
+}
+
+func TestDetailHelpLineIsTrimmed(t *testing.T) {
+	f, _ := detailFixture(t, 2, 2)
+	m := newTestModel(f)
+	m.w, m.h = 80, 30
+	m = settle(t, m, m.Init()())
+	m = press(t, m, keyEnter)
+
+	lines := viewLines(m)
+	help := lines[len(lines)-1]
+	if lipgloss.Width(help) > 80 {
+		t.Fatalf("help line is %d wide at 80 columns: %q", lipgloss.Width(help), help)
+	}
+	for _, gone := range []string{"w wake", "b reboot", "x reset"} {
+		if strings.Contains(help, gone) {
+			t.Fatalf("help line still lists %q: %q", gone, help)
+		}
+	}
+	for _, want := range []string{"tab", "esc", "/", "r refresh", "q quit"} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("help line lacks %q: %q", want, help)
+		}
+	}
+}
+
+func TestDetailSlashFromEventsFocusesParams(t *testing.T) {
+	_, m := detailFixture(t, 2, 2)
+	m = press(t, m, keyTab)
+	m = press(t, m, keyTab) // events
+	if m.det.focus != focusEvents {
+		t.Fatalf("focus: %v", m.det.focus)
+	}
+	m = press(t, m, typed("/"))
+	if m.det.focus != focusParams || !m.det.filter.editing {
+		t.Fatalf("slash did not focus the tree: focus=%v editing=%v", m.det.focus, m.det.filter.editing)
+	}
+	m = press(t, m, typed("manu"))
+	if !strings.Contains(stripANSI(m.View()), "PARAMETERS  0 of") {
+		t.Fatalf("filter did not apply:\n%s", m.View())
+	}
+}
+
+func TestDetailEscFocusOrder(t *testing.T) {
+	_, m := detailFixture(t, 2, 2)
+	m = press(t, m, keyTab) // tasks
+	m = press(t, m, keyEsc)
+	if m.det.focus != focusParams || m.screen != scrDevice {
+		t.Fatalf("esc from tasks: focus=%v screen=%v", m.det.focus, m.screen)
+	}
+	m = press(t, m, keyEsc)
+	if m.screen != scrDevices {
+		t.Fatalf("esc from parameters did not leave the detail: %v", m.screen)
 	}
 }

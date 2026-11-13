@@ -571,7 +571,8 @@ time is always shown.
 | `↑ ↓` / `j k`, `g G` | move, jump to ends |
 | `Enter` | open a device or job; expand one parameter level |
 | `Esc` / `Backspace` | collapse a level, then back to the list; cancel a confirm. While typing a filter, `Backspace` deletes a character |
-| `/` | filter the rows: serial prefix, product class, version, freshness. On the device screen, filter cached parameter paths (substring, parents kept, match count in the header) |
+| `/` | filter the rows: serial prefix, product class, version, freshness. On the device screen, focus Parameters and filter cached paths (substring, parents kept, `N of M` in the header) |
+| `Tab` | on the device screen, cycle focus between Parameters, Tasks and Events |
 | `s` | cycle the task status filter (tasks screen) |
 | `r` | refresh now; the last refresh time is shown |
 | `w` | wake the selected device, after `y/n` |
@@ -580,7 +581,10 @@ time is always shown.
 | `q`, `Ctrl+C` | quit |
 
 The device screen puts the facts and the actions side by side — the actions
-move below them under 82 columns — so the parameter tree gets the width. Facts
+move below them under 82 columns — so the parameter tree gets the width. Below
+the header sit three panes, Parameters, Tasks and Events; `Tab` moves focus
+between them, each keeps its own cursor, `↑↓`/`g G` move inside the focused one,
+and the headers show how far through the loaded rows you are (`TASKS 4 of 20`). Facts
 shown: serial, product class, software version, inform age (`fresh` within two
 inform intervals, `stale` within six, `offline` beyond), last address,
 whether connection-request credentials are set, cached parameters one level at
