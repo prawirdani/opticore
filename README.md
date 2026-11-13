@@ -227,6 +227,13 @@ Tasks expire at `max(2 × inform interval, OPTICORE_TASK_EXPIRY)` after
 `run_at`, so a reboot scheduled for 02:00 stays valid until then, and a device
 that stays away does not accumulate a queue forever.
 
+**Summon is wake plus get.** GenieACS's Summon button is a connection request
+followed by a whole-tree refresh; Opticore has the same two halves and no
+separate command. `opticore task <serial> get` with no paths queues that
+refresh, and queueing it wakes the device, so the `get` runs inside the session
+the connection request opened. Wake alone (`POST .../wake`, `w` in the console)
+only asks the device to call in; it reads nothing.
+
 ## Tasks
 
 `POST /v1/devices/{id}/tasks` takes one task or an array of them (an ordered
