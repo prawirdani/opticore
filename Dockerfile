@@ -13,6 +13,6 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/opticore /opticore
 USER nonroot:nonroot
-EXPOSE 7547 8081 8082
+EXPOSE 7547 8081
 ENTRYPOINT ["/opticore"]
 CMD ["serve"]

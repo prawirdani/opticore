@@ -30,14 +30,12 @@ type Config struct {
 	CWMPAuthUsername   string         // device-to-ACS credentials; empty: none
 	CWMPAuthPassword   string
 
-	APIAddr  string
-	FileAddr string
+	APIAddr string
 
 	// API security.
 	APIAuth          bool // require a bearer token on /v1
 	APIInsecureLocal bool // accept unauthenticated /v1 on loopback only
 	APIRequireReveal bool // ?reveal=1 needs a token with the reveal scope
-	FirmwareDir      string
 
 	HookURL         string
 	HookSecret      string
@@ -198,8 +196,6 @@ func Load(getenv func(string) string) (Config, error) {
 		APIAuth:            l.boolean("OPTICORE_API_AUTH", true),
 		APIInsecureLocal:   l.boolean("OPTICORE_API_INSECURE_LOCAL", false),
 		APIRequireReveal:   l.boolean("OPTICORE_API_REQUIRE_REVEAL", true),
-		FileAddr:           l.addr("OPTICORE_FILE_ADDR", ":8082"),
-		FirmwareDir:        l.str("OPTICORE_FIRMWARE_DIR", "/var/lib/opticore/firmware"),
 		HookURL:            l.str("OPTICORE_HOOK_URL", ""),
 		HookSecret:         l.str("OPTICORE_HOOK_SECRET", ""),
 		HookEvents:         l.list("OPTICORE_HOOK_EVENTS", "0 BOOTSTRAP"),

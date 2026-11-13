@@ -41,8 +41,6 @@ func TestLoadDefaults(t *testing.T) {
 		{"CWMPMaxBody", cfg.CWMPMaxBody, int64(10 << 20)},
 		{"CWMPMaxSessions", cfg.CWMPMaxSessions, 1000},
 		{"APIAddr", cfg.APIAddr, ":8081"},
-		{"FileAddr", cfg.FileAddr, ":8082"},
-		{"FirmwareDir", cfg.FirmwareDir, "/var/lib/opticore/firmware"},
 		{"HookStepTimeout", cfg.HookStepTimeout, 2 * time.Second},
 		{"HookTimeout", cfg.HookTimeout, 10 * time.Second},
 		{"TaskExpiry", cfg.TaskExpiry, 10 * time.Minute},

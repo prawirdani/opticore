@@ -62,7 +62,7 @@ Each release carries static binaries for `linux`, `darwin` and `windows`, on
 `amd64` and `arm64`, plus `checksums.txt`:
 
 ```sh
-ver=v1.2.3   # the release you want
+ver=v0.1.0   # the release you want
 curl -LO "https://github.com/prawirdani/opticore/releases/download/$ver/opticore_${ver}_linux_amd64"
 curl -LO "https://github.com/prawirdani/opticore/releases/download/$ver/checksums.txt"
 sha256sum -c checksums.txt --ignore-missing
@@ -96,13 +96,12 @@ docker run --rm -p 7547:7547 -p 8081:8081 \
 
 The image is distroless and runs as non-root, with `serve` as the command, so
 migrations apply at start. It carries CA certificates for an `https` hook URL.
-Mount nothing: all configuration is environment variables. Port `8082` is
-exposed for the file server, which is not implemented yet.
+Mount nothing: all configuration is environment variables.
 
 ## First run
 
 ```sh
-cat > .env <<'ENV'
+cat > .env <<ENV
 OPTICORE_DB_DSN=postgres://postgres:secret@localhost:5432/opticore?sslmode=disable
 OPTICORE_SECRET_KEY=$(openssl rand -base64 32)
 CWMP_ADDR=:7547
@@ -198,9 +197,6 @@ unit, a container, or a one-off `FOO=1 opticore serve` behaves as written.
 | `OPTICORE_EVENT_RETENTION` | `720h` | events older than this are deleted |
 | `OPTICORE_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `OPTICORE_LOG_FILE` | empty | append JSON logs to this file instead of stderr, which is what `opticore logs` and the console's logs tab read |
-
-`OPTICORE_FILE_ADDR` and `OPTICORE_FIRMWARE_DIR` are read but unused: firmware
-transfer is not implemented yet.
 
 ## How a session works
 
@@ -526,7 +522,7 @@ and nothing else. Pushing that tag:
 
 Planned, not built yet:
 
-- Firmware: upload, the file server on `8082`, the `download` task and
+- Firmware: upload, a device-facing file server, the `download` task and
   `TransferComplete`.
 - `token list` and `token revoke`.
 - Creating a job from the CLI.
