@@ -27,6 +27,9 @@ import (
 	"github.com/prawirdani/opticore/internal/wake"
 )
 
+// version is set at build time: -ldflags "-X main.version=v1.2.3".
+var version = "dev"
+
 const usage = `usage: opticore <command> [args]
 
   serve                                 run the daemon
@@ -42,6 +45,7 @@ const usage = `usage: opticore <command> [args]
   job cancel <id>
   wake <serial|id>
   token create <name> --scope read,write[,reveal]
+  version                               print the build version
 `
 
 func main() {
@@ -74,6 +78,8 @@ func main() {
 		err = cmdWake(ctx, args)
 	case "token":
 		err = cmdToken(ctx, args)
+	case "version":
+		fmt.Println(version)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
