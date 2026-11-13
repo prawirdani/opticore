@@ -381,3 +381,40 @@ func TestHealthHelpers(t *testing.T) {
 		t.Fatalf("NewestInform = %v, %v, want %v", got, err, at)
 	}
 }
+
+func TestPurgeOld(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	if _, _, err := s.RecordInform(ctx, sampleInform(time.Now().UTC())); err != nil {
+		t.Fatal(err)
+	}
+	ts, err := s.CreateTasks(ctx, "48575443BD7589AB", []NewTask{{Name: "get"}, {Name: "get"}, {Name: "get"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// old done, old pending, fresh done
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := s.pool.Exec(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`UPDATE tasks SET status='done', updated_at = now() - interval '40 days' WHERE id = $1`, ts[0].ID)
+	exec(`UPDATE tasks SET updated_at = now() - interval '40 days' WHERE id = $1`, ts[1].ID)
+	exec(`UPDATE tasks SET status='done' WHERE id = $1`, ts[2].ID)
+	exec(`UPDATE events SET at = now() - interval '40 days'`)
+
+	nt, ne, err := s.PurgeOld(ctx, 30*24*time.Hour, 30*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nt != 1 || ne == 0 {
+		t.Errorf("purged tasks=%d events=%d, want 1 and >0", nt, ne)
+	}
+	if n := count(t, s, `SELECT count(*) FROM tasks`); n != 2 {
+		t.Errorf("tasks left = %d, want 2 (old pending kept)", n)
+	}
+	if nt, ne, _ := s.PurgeOld(ctx, 0, 0); nt != 0 || ne != 0 {
+		t.Error("zero retention must keep everything")
+	}
+}

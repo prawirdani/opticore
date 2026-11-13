@@ -204,6 +204,29 @@ func (s *Store) ExpireTasks(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
+// PurgeOld deletes finished tasks and events older than their retention. A
+// zero retention keeps rows forever. Pending and running tasks are never
+// touched, however old.
+func (s *Store) PurgeOld(ctx context.Context, taskRetention, eventRetention time.Duration) (tasks, events int64, err error) {
+	if taskRetention > 0 {
+		tag, err := s.pool.Exec(ctx, `DELETE FROM tasks
+			WHERE status IN ('done','failed','unknown','cancelled','expired')
+			  AND updated_at < now() - $1::interval`, taskRetention.String())
+		if err != nil {
+			return 0, 0, fmt.Errorf("store: purge tasks: %w", err)
+		}
+		tasks = tag.RowsAffected()
+	}
+	if eventRetention > 0 {
+		tag, err := s.pool.Exec(ctx, `DELETE FROM events WHERE at < now() - $1::interval`, eventRetention.String())
+		if err != nil {
+			return tasks, 0, fmt.Errorf("store: purge events: %w", err)
+		}
+		events = tag.RowsAffected()
+	}
+	return tasks, events, nil
+}
+
 func resolveDevice(ctx context.Context, q rowQuerier, idOrSerial string) (string, int, error) {
 	var (
 		id       string

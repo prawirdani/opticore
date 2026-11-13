@@ -179,7 +179,7 @@ func serve(ctx context.Context) error {
 
 	janitorCtx, cancelJanitor := context.WithCancel(ctx)
 	defer cancelJanitor()
-	go janitor(janitorCtx, st, log)
+	go janitor(janitorCtx, st, log, cfg.TaskRetention, cfg.EventRetention)
 
 	errc := make(chan error, 2)
 	go func() { errc <- srv.ListenAndServe() }()
@@ -216,18 +216,28 @@ func health(w http.ResponseWriter, r *http.Request, st *store.Store) {
 	json.NewEncoder(w).Encode(out)
 }
 
-func janitor(ctx context.Context, st *store.Store, log *slog.Logger) {
+func janitor(ctx context.Context, st *store.Store, log *slog.Logger, taskRetention, eventRetention time.Duration) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
+	var lastPurge time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case now := <-t.C:
 			if n, err := st.ExpireTasks(ctx); err != nil {
 				log.Error("janitor: expire tasks", "err", err)
 			} else if n > 0 {
 				log.Info("janitor: expired tasks", "count", n)
+			}
+			if now.Sub(lastPurge) < time.Hour {
+				continue
+			}
+			lastPurge = now
+			if nt, ne, err := st.PurgeOld(ctx, taskRetention, eventRetention); err != nil {
+				log.Error("janitor: purge", "err", err)
+			} else if nt+ne > 0 {
+				log.Info("janitor: purged old rows", "tasks", nt, "events", ne)
 			}
 		}
 	}
