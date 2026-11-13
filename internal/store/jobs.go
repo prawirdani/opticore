@@ -38,6 +38,9 @@ type Job struct {
 	MaxParallel int
 	Status      string
 	CreatedAt   time.Time
+	// UpdatedAt moves on every status change and on every terminal task of
+	// the job. The SSE tail reads it.
+	UpdatedAt time.Time
 }
 
 // JobSelector selects the devices a job expands to. An explicit list and a
@@ -51,11 +54,14 @@ type JobSelector struct {
 }
 
 // NewJob is one bulk job to create. Task is the template copied per device.
+// PerDevice, when non-nil, overrides it with explicit per-device task lists
+// (a revert keeps one task per original set, so a single template will not do).
 type NewJob struct {
 	Name        string
 	Spec        json.RawMessage
 	Selector    JobSelector
 	Task        NewTask
+	PerDevice   map[string][]NewTask
 	MaxParallel int
 	RunAt       time.Time
 }
@@ -68,14 +74,14 @@ type JobFailure struct {
 	Fault     string `json:"fault"`
 }
 
-const jobCols = `id, name, spec, max_parallel, status, created_at`
+const jobCols = `id, name, spec, max_parallel, status, created_at, updated_at`
 
 func scanJob(row pgx.Row) (Job, error) {
 	var (
 		j    Job
 		spec []byte
 	)
-	if err := row.Scan(&j.ID, &j.Name, &spec, &j.MaxParallel, &j.Status, &j.CreatedAt); err != nil {
+	if err := row.Scan(&j.ID, &j.Name, &spec, &j.MaxParallel, &j.Status, &j.CreatedAt, &j.UpdatedAt); err != nil {
 		return Job{}, err
 	}
 	j.Spec = spec
@@ -121,7 +127,20 @@ func (s *Store) CreateJob(ctx context.Context, j NewJob) (Job, []Task, error) {
 	now := time.Now().UTC()
 	out := make([]Task, 0, len(devices))
 	for _, d := range devices {
-		tasks, err := s.insertTasks(ctx, tx, d.id, d.interval, nil, []NewTask{task}, now)
+		batch := []NewTask{task}
+		if j.PerDevice != nil {
+			per, ok := j.PerDevice[d.id]
+			if !ok {
+				return Job{}, nil, fmt.Errorf("store: create job: device %s has no task", d.id)
+			}
+			batch = make([]NewTask, len(per))
+			for i, nt := range per {
+				nt.RunAt = j.RunAt.UTC()
+				nt.JobID = &job.ID
+				batch[i] = nt
+			}
+		}
+		tasks, err := s.insertTasks(ctx, tx, d.id, d.interval, nil, batch, now)
 		if err != nil {
 			return Job{}, nil, err
 		}
@@ -233,6 +252,30 @@ func (s *Store) GetJob(ctx context.Context, id int64) (Job, error) {
 	return j, nil
 }
 
+// JobsUpdatedSince returns jobs changed after (since, sinceID), oldest first.
+// The pair keeps same-microsecond updates from being skipped.
+func (s *Store) JobsUpdatedSince(ctx context.Context, since time.Time, sinceID int64, limit int) ([]Job, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := s.pool.Query(ctx, `SELECT `+jobCols+` FROM jobs
+		WHERE (updated_at, id) > ($1, $2)
+		ORDER BY updated_at, id LIMIT $3`, since, sinceID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: jobs updated since: %w", err)
+	}
+	defer rows.Close()
+	out := []Job{}
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: jobs updated since: %w", err)
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
 // ListJobs lists jobs newest first. Limit zero means 100.
 func (s *Store) ListJobs(ctx context.Context, limit int) ([]Job, error) {
 	if limit <= 0 {
@@ -303,16 +346,18 @@ func (s *Store) CancelJob(ctx context.Context, id int64) error {
 	}
 	defer tx.Rollback(ctx)
 
-	tag, err := tx.Exec(ctx, `UPDATE jobs SET status = 'cancelled' WHERE id = $1`, id)
+	// Tasks first: the 00004 trigger then locks the job row, the same order
+	// FinishTask takes, so the two cannot deadlock on a cancel/finish race.
+	if _, err := tx.Exec(ctx, `UPDATE tasks SET status = 'cancelled', updated_at = now()
+		WHERE job_id = $1 AND status = 'pending'`, id); err != nil {
+		return fmt.Errorf("store: cancel job tasks: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `UPDATE jobs SET status = 'cancelled', updated_at = now() WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("store: cancel job: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrJobNotFound
-	}
-	if _, err := tx.Exec(ctx, `UPDATE tasks SET status = 'cancelled', updated_at = now()
-		WHERE job_id = $1 AND status = 'pending'`, id); err != nil {
-		return fmt.Errorf("store: cancel job tasks: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("store: cancel job: %w", err)
@@ -370,7 +415,7 @@ func (s *Store) DueJobTasks(ctx context.Context, jobID int64, limit int, exclude
 // FinishJobs marks running jobs done when they have no pending or running
 // task left. Cancelled jobs are left alone.
 func (s *Store) FinishJobs(ctx context.Context) (int64, error) {
-	tag, err := s.pool.Exec(ctx, `UPDATE jobs SET status = 'done'
+	tag, err := s.pool.Exec(ctx, `UPDATE jobs SET status = 'done', updated_at = now()
 		WHERE status = 'running' AND NOT EXISTS (
 			SELECT 1 FROM tasks
 			WHERE tasks.job_id = jobs.id AND tasks.status IN ('pending','running'))`)

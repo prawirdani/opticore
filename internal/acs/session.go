@@ -54,6 +54,11 @@ type state struct {
 	events       []string
 	informParams map[string]hook.Param
 
+	// ping is the device's waiting ping task; pingReady is set when this
+	// Inform carries 8 DIAGNOSTICS COMPLETE.
+	ping      *store.Task
+	pingReady bool
+
 	// hook drives the operator provisioner inside this session (§7).
 	hook     *hookState
 	apiQueue []store.Task // tasks that were queued before the hook
@@ -154,14 +159,26 @@ func (h *Sessions) Inform(ctx context.Context, s *cwmp.Session, in *cwmp.Inform)
 	if err != nil {
 		return err
 	}
+	diagComplete := false
+	for _, code := range rec.Events {
+		if strings.HasPrefix(code, "8 ") {
+			diagComplete = true
+		}
+	}
+	waiting, err := h.Store.WaitingPing(ctx, dev.ID)
+	if err != nil {
+		return err
+	}
 	st := &state{
-		dev:      dev,
-		root:     root,
-		queue:    tasks,
-		crWanted: crTrusted && root != "" && (bootstrap || dev.CRSetAt == nil || dev.CRPassword == ""),
-		instance: map[string]int{},
-		dead:     map[string]bool{},
-		events:   rec.Events,
+		dev:       dev,
+		root:      root,
+		queue:     tasks,
+		crWanted:  crTrusted && root != "" && (bootstrap || dev.CRSetAt == nil || dev.CRPassword == ""),
+		instance:  map[string]int{},
+		dead:      map[string]bool{},
+		events:    rec.Events,
+		ping:      waiting,
+		pingReady: diagComplete,
 	}
 	if h.Hook != nil && hook.Matches(rec.Events, h.HookEvents) {
 		st.apiQueue, st.queue = tasks, nil
@@ -206,6 +223,25 @@ func (h *Sessions) Next(ctx context.Context, s *cwmp.Session) (cwmp.Request, boo
 			Tag: tag{kind: "cr"},
 		}, true, nil
 	}
+	// 8 DIAGNOSTICS COMPLETE reads the waiting ping before anything else.
+	if st.ping != nil && st.pingReady {
+		st.pingReady = false
+		if obj, err := pingObject(st.root); err != nil {
+			waiting := st.ping
+			st.ping = nil
+			if err := h.fail(ctx, s, waiting, 0, err.Error()); err != nil {
+				return cwmp.Request{}, false, err
+			}
+		} else {
+			st.cur = st.ping
+			st.steps = nil
+			return cwmp.Request{
+				Kind:  cwmp.ReqGetParameterValues,
+				Names: pingResultNames(obj),
+				Tag:   tag{"task", "pingget"},
+			}, true, nil
+		}
+	}
 	for {
 		// The provisioner runs before the queued API tasks (§7).
 		if st.hook != nil && !st.hook.done && !st.hook.running && len(st.steps) == 0 {
@@ -244,6 +280,12 @@ func (h *Sessions) Next(ctx context.Context, s *cwmp.Session) (cwmp.Request, boo
 		}
 		t := st.queue[0]
 		st.queue = st.queue[1:]
+		if t.Name == "ping" && st.ping != nil {
+			continue // one ping per device waits at a time
+		}
+		if t.Name == "ping" {
+			st.pingReady = false // this Inform's 8 event is for an older ping
+		}
 		if t.BatchID != nil && st.dead[*t.BatchID] {
 			continue
 		}
@@ -419,6 +461,21 @@ func (h *Sessions) plan(st *state, t *store.Task) ([]cwmp.Request, error) {
 		return []cwmp.Request{{Kind: cwmp.ReqReboot, Key: key, Tag: tag{"task", "reboot"}}}, nil
 	case "reset":
 		return []cwmp.Request{{Kind: cwmp.ReqFactoryReset, Tag: tag{"task", "reset"}}}, nil
+	case "ping":
+		var a PingArgs
+		if err := json.Unmarshal(t.Args, &a); err != nil {
+			return nil, err
+		}
+		obj, err := pingObject(st.root)
+		if err != nil {
+			return nil, err
+		}
+		return []cwmp.Request{{
+			Kind:   cwmp.ReqSetParameterValues,
+			Values: pingSet(obj, a),
+			Key:    key,
+			Tag:    tag{"task", "pingset"},
+		}}, nil
 	}
 	return nil, fmt.Errorf("task %q is not supported yet", t.Name)
 }
@@ -539,6 +596,43 @@ func (h *Sessions) Response(ctx context.Context, s *cwmp.Session, req cwmp.Reque
 			res["status"] = m.DeleteObjectResponse.Status
 		}
 		return h.done(ctx, s, t, res)
+	case "pingset":
+		b, _ := json.Marshal(map[string]any{"phase": "requested"})
+		if err := h.Store.SetTaskResult(ctx, t.ID, b); err != nil {
+			return err
+		}
+		st.cur = nil
+		st.ping = t
+		st.pingReady = false
+		h.Logger.Info("ping requested", "device_id", s.DeviceID, "task", t.ID)
+		return nil
+	case "pingget":
+		st.cur = nil
+		st.ping = nil
+		obj, err := pingObject(st.root)
+		if err != nil {
+			return h.fail(ctx, s, t, 0, err.Error())
+		}
+		state, res := pingResult(obj, m.GetParameterValuesResponse.Params)
+		b, _ := json.Marshal(res)
+		if state == "Complete" {
+			h.Logger.Info("ping done", "device_id", s.DeviceID, "task", t.ID)
+			return h.Store.FinishTask(ctx, t.ID, "done", b, nil, "")
+		}
+		if state == "" {
+			state = "diagnostics did not report a state"
+		}
+		if err := h.Store.FinishTask(ctx, t.ID, "failed", b, nil, state); err != nil {
+			return err
+		}
+		if err := h.Store.SetLastFault(ctx, s.DeviceID, faultJSON(0, state, t.ID)); err != nil {
+			return err
+		}
+		if t.BatchID != nil {
+			h.skipBatch(s, t)
+			return h.Store.CancelBatchRest(ctx, *t.BatchID, t.BatchSeq)
+		}
+		return nil
 	case "reboot", "reset":
 		return h.done(ctx, s, t, map[string]any{})
 	}
@@ -620,7 +714,19 @@ func (h *Sessions) Close(s *cwmp.Session, inflight *cwmp.Request) {
 		tg, _ = inflight.Tag.(tag)
 	}
 	var err error
-	if inflight == nil || tg.step == "prev" || idempotent(t.Name) {
+	if t.Name == "ping" {
+		var ph struct {
+			Phase string `json:"phase"`
+		}
+		json.Unmarshal(t.Result, &ph)
+		if ph.Phase == "requested" || (inflight != nil && tg.step == "pingget") {
+			// The result read was lost; stay waiting for the next event 8 or
+			// expiry rather than re-requesting a ping the device already ran.
+			return
+		}
+		// The start SPV is safe to resend: it just re-requests.
+		err = h.Store.RequeueTask(ctx, t.ID)
+	} else if inflight == nil || tg.step == "prev" || idempotent(t.Name) {
 		// Nothing irreversible was sent (or it is safe to resend): run again later.
 		err = h.Store.RequeueTask(ctx, t.ID)
 	} else {

@@ -35,7 +35,7 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	if cursor == "" {
 		cursor = r.URL.Query().Get("last_event_id")
 	}
-	lastEvent, lastTaskAt, lastTaskID := s.sseStart(r.Context(), cursor)
+	cur := s.sseStart(r.Context(), cursor)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -60,15 +60,32 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case <-poll.C:
-			s.ssePump(r.Context(), w, flusher, types, device, reveal,
-				&lastEvent, &lastTaskAt, &lastTaskID)
+			s.ssePump(r.Context(), w, flusher, types, device, reveal, &cur)
 		}
 	}
 }
 
-// sseStart resolves a resume cursor into an events.id, a task updated_at and
-// a task id. Without a cursor it starts at the current end of both tables.
-func (s *Server) sseStart(ctx context.Context, cursor string) (int64, time.Time, int64) {
+// sseCursor is the resume position of one stream: the last events.id, the
+// last (tasks.updated_at, tasks.id) and the last (jobs.updated_at, jobs.id).
+//
+// Cursor formats accepted in Last-Event-ID or ?last_event_id=:
+//
+//	e<events.id>       events after that id; tasks and jobs from its time.
+//	t<tasks.id>:<ns>   tasks after (ns, id); events and jobs from ns.
+//	j<jobs.id>:<ns>    jobs after (ns, id); events and tasks from ns.
+//
+// A bare integer is read as e<n>, so the oldest format keeps working.
+type sseCursor struct {
+	eventID int64
+	taskAt  time.Time
+	taskID  int64
+	jobAt   time.Time
+	jobID   int64
+}
+
+// sseStart resolves a resume cursor. Without one it starts at the current end
+// of all three tables.
+func (s *Server) sseStart(ctx context.Context, cursor string) sseCursor {
 	if cursor == "" {
 		now, err := s.st.Now(ctx)
 		if err != nil {
@@ -79,7 +96,8 @@ func (s *Server) sseStart(ctx context.Context, cursor string) (int64, time.Time,
 		if err != nil {
 			s.log.Error("sse: max event id", "err", err)
 		}
-		return lastEvent, now, math.MaxInt64
+		return sseCursor{eventID: lastEvent, taskAt: now, taskID: math.MaxInt64,
+			jobAt: now, jobID: math.MaxInt64}
 	}
 	if rest, ok := strings.CutPrefix(cursor, "e"); ok {
 		id, err := strconv.ParseInt(rest, 10, 64)
@@ -94,24 +112,29 @@ func (s *Server) sseStart(ctx context.Context, cursor string) (int64, time.Time,
 			at, _ = s.st.Now(ctx)
 			at = at.Add(-time.Second)
 		}
-		return id, at, -1
+		return sseCursor{eventID: id, taskAt: at, taskID: -1, jobAt: at, jobID: -1}
 	}
 	if rest, ok := strings.CutPrefix(cursor, "t"); ok {
-		idPart, nsPart, ok := strings.Cut(rest, ":")
+		id, at, ok := parseRowCursor(rest)
 		if !ok {
 			return s.sseStart(ctx, "")
 		}
-		id, err1 := strconv.ParseInt(idPart, 10, 64)
-		ns, err2 := strconv.ParseInt(nsPart, 10, 64)
-		if err1 != nil || err2 != nil {
-			return s.sseStart(ctx, "")
-		}
-		at := time.Unix(0, ns).UTC()
 		lastEvent, err := s.st.MaxEventIDAt(ctx, at)
 		if err != nil {
 			s.log.Error("sse: max event id at", "err", err)
 		}
-		return lastEvent, at, id
+		return sseCursor{eventID: lastEvent, taskAt: at, taskID: id, jobAt: at, jobID: -1}
+	}
+	if rest, ok := strings.CutPrefix(cursor, "j"); ok {
+		id, at, ok := parseRowCursor(rest)
+		if !ok {
+			return s.sseStart(ctx, "")
+		}
+		lastEvent, err := s.st.MaxEventIDAt(ctx, at)
+		if err != nil {
+			s.log.Error("sse: max event id at", "err", err)
+		}
+		return sseCursor{eventID: lastEvent, taskAt: at, taskID: -1, jobAt: at, jobID: id}
 	}
 	if id, err := strconv.ParseInt(cursor, 10, 64); err == nil {
 		return s.sseStart(ctx, "e"+strconv.FormatInt(id, 10))
@@ -119,17 +142,30 @@ func (s *Server) sseStart(ctx context.Context, cursor string) (int64, time.Time,
 	return s.sseStart(ctx, "")
 }
 
+// parseRowCursor parses "<id>:<unixnano>" from a t or j cursor.
+func parseRowCursor(rest string) (int64, time.Time, bool) {
+	idPart, nsPart, ok := strings.Cut(rest, ":")
+	if !ok {
+		return 0, time.Time{}, false
+	}
+	id, err1 := strconv.ParseInt(idPart, 10, 64)
+	ns, err2 := strconv.ParseInt(nsPart, 10, 64)
+	if err1 != nil || err2 != nil {
+		return 0, time.Time{}, false
+	}
+	return id, time.Unix(0, ns).UTC(), true
+}
+
 func (s *Server) ssePump(ctx context.Context, w http.ResponseWriter, flusher http.Flusher,
-	types map[string]bool, device string, reveal bool,
-	lastEvent *int64, lastTaskAt *time.Time, lastTaskID *int64) {
+	types map[string]bool, device string, reveal bool, cur *sseCursor) {
 	for {
-		events, err := s.st.EventsSinceID(ctx, *lastEvent, sseBatch)
+		events, err := s.st.EventsSinceID(ctx, cur.eventID, sseBatch)
 		if err != nil {
 			s.log.Error("sse: events", "err", err)
 			return
 		}
 		for _, e := range events {
-			*lastEvent = e.ID
+			cur.eventID = e.ID
 			if device != "" && e.DeviceID != device {
 				continue
 			}
@@ -145,17 +181,19 @@ func (s *Server) ssePump(ctx context.Context, w http.ResponseWriter, flusher htt
 		}
 	}
 	for {
-		tasks, err := s.st.TasksUpdatedSince(ctx, *lastTaskAt, *lastTaskID, sseBatch)
+		tasks, err := s.st.TasksUpdatedSince(ctx, cur.taskAt, cur.taskID, sseBatch)
 		if err != nil {
 			s.log.Error("sse: tasks", "err", err)
 			return
 		}
 		for _, t := range tasks {
-			*lastTaskAt = t.UpdatedAt
-			*lastTaskID = t.ID
+			cur.taskAt = t.UpdatedAt
+			cur.taskID = t.ID
 			if device != "" && t.DeviceID != device {
 				continue
 			}
+			// A terminal task moves its job's counts; the trigger touched
+			// jobs.updated_at, so the job loop below emits the snapshot.
 			if len(types) > 0 && !types["task"] {
 				continue
 			}
@@ -166,6 +204,43 @@ func (s *Server) ssePump(ctx context.Context, w http.ResponseWriter, flusher htt
 			}
 		}
 		if len(tasks) < sseBatch {
+			break
+		}
+	}
+	// A job event is aggregate, not device-scoped: with ?device_id= set we
+	// still advance the cursor but emit no job event.
+	for {
+		jobs, err := s.st.JobsUpdatedSince(ctx, cur.jobAt, cur.jobID, sseBatch)
+		if err != nil {
+			s.log.Error("sse: jobs", "err", err)
+			return
+		}
+		for _, j := range jobs {
+			cur.jobAt = j.UpdatedAt
+			cur.jobID = j.ID
+			if device != "" {
+				continue
+			}
+			if len(types) > 0 && !types["job"] {
+				continue
+			}
+			counts, err := s.st.JobCounts(ctx, j.ID)
+			if err != nil {
+				s.log.Error("sse: job counts", "err", err)
+				return
+			}
+			failures, err := s.st.JobFailures(ctx, j.ID)
+			if err != nil {
+				s.log.Error("sse: job failures", "err", err)
+				return
+			}
+			id := "j" + strconv.FormatInt(j.ID, 10) + ":" +
+				strconv.FormatInt(j.UpdatedAt.UnixNano(), 10)
+			if !writeSSE(w, flusher, id, "job", jobView(j, counts, failures)) {
+				return
+			}
+		}
+		if len(jobs) < sseBatch {
 			return
 		}
 	}

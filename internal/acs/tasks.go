@@ -144,6 +144,16 @@ func (svc *Service) prepare(t *store.NewTask) error {
 		if len(t.Args) == 0 {
 			t.Args = json.RawMessage(`{}`)
 		}
+	case "ping":
+		a, err := parsePingArgs(t.Args)
+		if err != nil {
+			return err
+		}
+		b, err := json.Marshal(a)
+		if err != nil {
+			return err
+		}
+		t.Args = b
 	default:
 		return fmt.Errorf("task %q is not supported yet", t.Name)
 	}

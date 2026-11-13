@@ -204,10 +204,46 @@ func (s *Store) ListTasks(ctx context.Context, deviceIDorSerial string, limit in
 	return scanTasks(rows)
 }
 
+// WaitingPing returns the device's running ping that is waiting for
+// 8 DIAGNOSTICS COMPLETE, or nil when there is none.
+func (s *Store) WaitingPing(ctx context.Context, deviceID string) (*Task, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+taskCols+` FROM tasks
+		WHERE device_id = $1 AND name = 'ping' AND status = 'running'
+		  AND result->>'phase' = 'requested'
+		ORDER BY id LIMIT 1`, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("store: waiting ping: %w", err)
+	}
+	tasks, err := scanTasks(rows)
+	if err != nil {
+		return nil, fmt.Errorf("store: waiting ping: %w", err)
+	}
+	if len(tasks) == 0 {
+		return nil, nil
+	}
+	return &tasks[0], nil
+}
+
+// SetTaskResult updates a task's result without changing its status.
+func (s *Store) SetTaskResult(ctx context.Context, id int64, result json.RawMessage) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE tasks SET result = $2, updated_at = now() WHERE id = $1`, id, []byte(result))
+	if err != nil {
+		return fmt.Errorf("store: set task result: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrTaskNotFound
+	}
+	return nil
+}
+
 // ExpireTasks marks runnable-past tasks expired. It is the janitor's sweep.
+// Running pings are included because they wait in running until the device
+// reports 8 DIAGNOSTICS COMPLETE, which may never arrive.
 func (s *Store) ExpireTasks(ctx context.Context) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET status = 'expired', updated_at = now()
-		WHERE status = 'pending' AND expires_at <= now()`)
+		WHERE expires_at <= now()
+		  AND (status = 'pending' OR (status = 'running' AND name = 'ping'))`)
 	if err != nil {
 		return 0, fmt.Errorf("store: expire tasks: %w", err)
 	}

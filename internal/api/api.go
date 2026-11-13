@@ -8,8 +8,10 @@
 //   - "eN" replays events with id > N and tasks updated at or after event N.
 //   - "tI:NS" replays tasks after (NS, I) and events newer than the newest
 //     event at NS.
+//   - "jJ:NS" (job snapshots, jobs.updated_at) replays jobs after (NS, J) and
+//     events and tasks from NS on.
 //
-// A stream without a cursor starts at the current end of both tables. Replay
+// A stream without a cursor starts at the current end of every table. Replay
 // is bounded by the events/tasks retention windows.
 package api
 
@@ -106,6 +108,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/devices/{id}/tasks", s.createTasks)
 	mux.HandleFunc("DELETE /v1/devices/{id}/tasks/{taskId}", s.cancelTask)
+	mux.HandleFunc("POST /v1/devices/{id}/tasks/{taskId}/revert", s.revertTask)
 	mux.HandleFunc("POST /v1/devices/{id}/wake", s.wakeDevice)
 	mux.HandleFunc("DELETE /v1/devices/{id}", s.deleteDevice)
 	mux.HandleFunc("GET /v1/devices", s.listDevices)
@@ -118,6 +121,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/jobs", s.listJobs)
 	mux.HandleFunc("GET /v1/jobs/{id}", s.getJob)
 	mux.HandleFunc("DELETE /v1/jobs/{id}", s.cancelJob)
+	mux.HandleFunc("POST /v1/jobs/{id}/revert", s.revertJob)
 	mux.HandleFunc("GET /v1/events", s.streamEvents)
 
 	var h http.Handler = mux

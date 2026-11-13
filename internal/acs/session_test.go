@@ -142,6 +142,7 @@ type fakeCPE struct {
 	params   map[string]string // GPV answers
 	faultSPV *string           // fault code to return on SPV instead of a response
 	faultGPV *string
+	root     string // data model root; "" means InternetGatewayDevice.
 
 	mu       sync.Mutex
 	sets     [][][3]string
@@ -184,6 +185,9 @@ func (f *fakeCPE) post(body string) (int, []byte) {
 func (f *fakeCPE) inform(serial string, events []string) int {
 	f.t.Helper()
 	body := fmt.Sprintf(informTpl, serial, eventList(events), time.Now().UTC().Format(time.RFC3339))
+	if f.root != "" && f.root != "InternetGatewayDevice." {
+		body = strings.ReplaceAll(body, "InternetGatewayDevice.", f.root)
+	}
 	code, _ := f.post(body)
 	return code
 }
@@ -876,5 +880,322 @@ func TestGetTaskCountsEveryChunk(t *testing.T) {
 	}
 	if err := json.Unmarshal(ts[0].Result, &res); err != nil || res.Count != 2 {
 		t.Errorf("result = %s (err %v), want count 2 across both chunks", ts[0].Result, err)
+	}
+}
+
+// ---- ping ----
+
+func findTask(t *testing.T, ts []store.Task, name string) store.Task {
+	t.Helper()
+	for _, x := range ts {
+		if x.Name == name {
+			return x
+		}
+	}
+	t.Fatalf("no %s task in %+v", name, ts)
+	return store.Task{}
+}
+
+func TestPingTwoSessionFlow(t *testing.T) {
+	cases := []struct {
+		name string
+		root string
+		obj  string
+	}{
+		{"TR-098", "", "InternetGatewayDevice.IPPingDiagnostics."},
+		{"TR-181", "Device.", "Device.IP.Diagnostics.IPPing."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, func(f *fakeCPE) { f.root = tc.root })
+			ctx := context.Background()
+			serial := "48575443BD7589AB"
+			h.sess.inform(serial, []string{"0 BOOTSTRAP", "1 BOOT"})
+			h.sess.run() // CR credentials
+
+			if _, err := h.svc.Enqueue(ctx, serial, []store.NewTask{{
+				Name: "ping", Args: json.RawMessage(`{"host":"8.8.8.8"}`),
+			}}); err != nil {
+				t.Fatal(err)
+			}
+
+			// Session 1: only the request SPV.
+			h.sess.inform(serial, []string{"2 PERIODIC"})
+			if n := h.sess.run(); n != 1 {
+				t.Fatalf("answered %d requests, want 1 (ping SPV)", n)
+			}
+			sets := h.sess.taskSets()
+			if len(sets) != 1 {
+				t.Fatalf("sets = %v, want one ping SPV", sets)
+			}
+			want := map[string]string{
+				tc.obj + "DiagnosticsState":    "Requested",
+				tc.obj + "Host":                "8.8.8.8",
+				tc.obj + "NumberOfRepetitions": "4",
+				tc.obj + "Timeout":             "1000",
+				tc.obj + "DataBlockSize":       "64",
+			}
+			got := map[string]string{}
+			for _, v := range sets[0] {
+				got[v[0]] = v[1]
+			}
+			for name, val := range want {
+				if got[name] != val {
+					t.Errorf("SPV %s = %q, want %q (all %v)", name, got[name], val, got)
+				}
+			}
+			if len(got) != len(want) {
+				t.Errorf("SPV leaves = %v, want %d leaves", got, len(want))
+			}
+			ts, _ := h.st.ListTasks(ctx, serial, 10)
+			ping := findTask(t, ts, "ping")
+			if ping.Status != "running" || !strings.Contains(string(ping.Result), `"requested"`) {
+				t.Fatalf("ping after SPV = %s %s, want running/requested", ping.Status, ping.Result)
+			}
+
+			// Session 2: event 8, one GPV of the result leaves.
+			h.sess.params = map[string]string{
+				tc.obj + "DiagnosticsState":    "Complete",
+				tc.obj + "SuccessCount":        "4",
+				tc.obj + "FailureCount":        "0",
+				tc.obj + "AverageResponseTime": "3",
+				tc.obj + "MinimumResponseTime": "2",
+				tc.obj + "MaximumResponseTime": "5",
+			}
+			h.sess.inform(serial, []string{"8 DIAGNOSTICS COMPLETE"})
+			if n := h.sess.run(); n != 1 {
+				t.Fatalf("answered %d requests, want 1 (result GPV)", n)
+			}
+			gpvs := h.sess.gpvNames()
+			if len(gpvs) != 1 {
+				t.Fatalf("GPVs = %v, want one", gpvs)
+			}
+			wantNames := pingResultNames(tc.obj)
+			if len(gpvs[0]) != len(wantNames) {
+				t.Fatalf("result GPV names = %v, want %v", gpvs[0], wantNames)
+			}
+			for i, name := range wantNames {
+				if gpvs[0][i] != name {
+					t.Errorf("result GPV name %d = %q, want %q", i, gpvs[0][i], name)
+				}
+			}
+			ts, _ = h.st.ListTasks(ctx, serial, 10)
+			ping = findTask(t, ts, "ping")
+			if ping.Status != "done" {
+				t.Fatalf("ping = %s %s, want done", ping.Status, ping.Result)
+			}
+			var res struct {
+				State   string `json:"state"`
+				Success int    `json:"success"`
+				Failure int    `json:"failure"`
+				Avg     int    `json:"avg_ms"`
+				Min     int    `json:"min_ms"`
+				Max     int    `json:"max_ms"`
+			}
+			if err := json.Unmarshal(ping.Result, &res); err != nil {
+				t.Fatal(err)
+			}
+			if res.State != "Complete" || res.Success != 4 || res.Failure != 0 ||
+				res.Avg != 3 || res.Min != 2 || res.Max != 5 {
+				t.Errorf("result = %+v", res)
+			}
+		})
+	}
+}
+
+func TestPingNonCompleteStateFailsWithNumbersKept(t *testing.T) {
+	h := newHarness(t, nil)
+	ctx := context.Background()
+	serial := "48575443BD7589AB"
+	obj := "InternetGatewayDevice.IPPingDiagnostics."
+	h.sess.inform(serial, []string{"0 BOOTSTRAP", "1 BOOT"})
+	h.sess.run()
+
+	if _, err := h.svc.Enqueue(ctx, serial, []store.NewTask{{
+		Name: "ping", Args: json.RawMessage(`{"host":"bad.example"}`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	h.sess.inform(serial, []string{"2 PERIODIC"})
+	h.sess.run()
+
+	h.sess.params = map[string]string{
+		obj + "DiagnosticsState":    "Error_CannotResolveHostName",
+		obj + "SuccessCount":        "0",
+		obj + "FailureCount":        "4",
+		obj + "AverageResponseTime": "0",
+		obj + "MinimumResponseTime": "0",
+		obj + "MaximumResponseTime": "0",
+	}
+	h.sess.inform(serial, []string{"8 DIAGNOSTICS COMPLETE"})
+	h.sess.run()
+
+	ts, _ := h.st.ListTasks(ctx, serial, 10)
+	ping := findTask(t, ts, "ping")
+	if ping.Status != "failed" || ping.Fault != "Error_CannotResolveHostName" {
+		t.Fatalf("ping = %s fault %q, want failed/Error_CannotResolveHostName", ping.Status, ping.Fault)
+	}
+	if !strings.Contains(string(ping.Result), `"failure"`) {
+		t.Errorf("result = %s, want the parsed counts kept", ping.Result)
+	}
+	var res struct {
+		Failure int `json:"failure"`
+	}
+	if err := json.Unmarshal(ping.Result, &res); err != nil || res.Failure != 4 {
+		t.Errorf("result = %s (err %v), want failure 4 kept", ping.Result, err)
+	}
+}
+
+func TestPingWaitsWithoutEvent8AndOtherTasksRun(t *testing.T) {
+	h := newHarness(t, nil)
+	ctx := context.Background()
+	serial := "48575443BD7589AB"
+	h.sess.inform(serial, []string{"0 BOOTSTRAP", "1 BOOT"})
+	h.sess.run()
+
+	if _, err := h.svc.Enqueue(ctx, serial, []store.NewTask{{
+		Name: "ping", Args: json.RawMessage(`{"host":"8.8.8.8"}`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	h.sess.inform(serial, []string{"2 PERIODIC"})
+	h.sess.run() // SPV, now waiting
+
+	// A second ping stays pending while the first waits.
+	if _, err := h.svc.Enqueue(ctx, serial, []store.NewTask{{Name: "ping", Args: json.RawMessage(`{"host":"1.1.1.1"}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.Enqueue(ctx, serial, []store.NewTask{{Name: "reboot"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.sess.inform(serial, []string{"2 PERIODIC"})
+	if n := h.sess.run(); n != 1 {
+		t.Fatalf("answered %d requests, want 1 (reboot only)", n)
+	}
+	if !h.sess.rebooted {
+		t.Error("device was not rebooted while the ping waited")
+	}
+	ts, _ := h.st.ListTasks(ctx, serial, 10)
+	for _, x := range ts {
+		switch x.Name {
+		case "ping":
+			if x.Attempts == 1 && x.Status != "running" {
+				t.Errorf("first ping = %s, want still running", x.Status)
+			}
+			if x.Attempts == 0 && x.Status != "pending" {
+				t.Errorf("second ping = %s, want pending", x.Status)
+			}
+		}
+	}
+}
+
+func TestPingCloseDuringWaitDoesNotRequeue(t *testing.T) {
+	var sessions *Sessions
+	h := newHarnessWith(t, nil, func(_ *harness, s *Sessions) { sessions = s })
+	ctx := context.Background()
+	serial := "48575443BD7589AB"
+	h.sess.inform(serial, []string{"0 BOOTSTRAP", "1 BOOT"})
+	h.sess.run()
+
+	if _, err := h.svc.Enqueue(ctx, serial, []store.NewTask{{
+		Name: "ping", Args: json.RawMessage(`{"host":"8.8.8.8"}`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	h.sess.inform(serial, []string{"2 PERIODIC"})
+	h.sess.run()
+
+	ts, _ := h.st.ListTasks(ctx, serial, 10)
+	ping := findTask(t, ts, "ping")
+	// A waiting ping is running with phase=requested; a lost result read keeps
+	// it there instead of requeueing or marking it unknown.
+	s := &cwmp.Session{DeviceID: serial, Data: &state{
+		root: "InternetGatewayDevice.",
+		cur:  &ping,
+	}}
+	inflight := &cwmp.Request{Tag: tag{"task", "pingget"}}
+	sessions.Close(s, inflight)
+
+	ts, _ = h.st.ListTasks(ctx, serial, 10)
+	ping = findTask(t, ts, "ping")
+	if ping.Status != "running" {
+		t.Fatalf("ping after Close = %s, want running", ping.Status)
+	}
+}
+
+func TestPingExpiresWhileWaiting(t *testing.T) {
+	h := newHarness(t, nil)
+	ctx := context.Background()
+	serial := "48575443BD7589AB"
+	h.sess.inform(serial, []string{"0 BOOTSTRAP", "1 BOOT"})
+	h.sess.run()
+
+	if _, err := h.svc.Enqueue(ctx, serial, []store.NewTask{{
+		Name: "ping", Args: json.RawMessage(`{"host":"8.8.8.8"}`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	h.sess.inform(serial, []string{"2 PERIODIC"})
+	h.sess.run()
+
+	ts, _ := h.st.ListTasks(ctx, serial, 10)
+	ping := findTask(t, ts, "ping")
+	if ping.Status != "running" {
+		t.Fatalf("ping = %s, want running", ping.Status)
+	}
+	if _, err := h.st.Pool().Exec(ctx,
+		`UPDATE tasks SET expires_at = now() - interval '1 minute' WHERE id = $1`, ping.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := h.st.ExpireTasks(ctx); err != nil || n != 1 {
+		t.Fatalf("ExpireTasks = %d, %v, want 1", n, err)
+	}
+	ts, _ = h.st.ListTasks(ctx, serial, 10)
+	if ping = findTask(t, ts, "ping"); ping.Status != "expired" {
+		t.Fatalf("ping = %s, want expired", ping.Status)
+	}
+}
+
+func TestPingArgsValidationAndDefaults(t *testing.T) {
+	h := newHarness(t, nil)
+	ctx := context.Background()
+	serial := "48575443BD7589AB"
+	h.sess.inform(serial, []string{"0 BOOTSTRAP", "1 BOOT"})
+	h.sess.run()
+
+	bad := []struct {
+		args string
+		want string
+	}{
+		{`{}`, "host is required"},
+		{`{"host":"8.8.8.8 9"}`, "whitespace"},
+		{`{"host":"8.8.8.8","count":-1}`, "count"},
+		{`{"host":"8.8.8.8","count":101}`, "count"},
+		{`{"host":"8.8.8.8","timeout_ms":-1}`, "timeout_ms"},
+		{`{"host":"8.8.8.8","timeout_ms":60001}`, "timeout_ms"},
+		{`{"host":"8.8.8.8","size":4}`, "size"},
+		{`{"host":"8.8.8.8","size":70000}`, "size"},
+	}
+	for _, tc := range bad {
+		_, err := h.svc.Enqueue(ctx, serial, []store.NewTask{{Name: "ping", Args: json.RawMessage(tc.args)}})
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("args %s: err = %v, want %q", tc.args, err, tc.want)
+		}
+	}
+
+	if _, err := h.svc.Enqueue(ctx, serial, []store.NewTask{{
+		Name: "ping", Args: json.RawMessage(`{"host":"8.8.8.8"}`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	ts, _ := h.st.ListTasks(ctx, serial, 10)
+	ping := findTask(t, ts, "ping")
+	var a PingArgs
+	if err := json.Unmarshal(ping.Args, &a); err != nil {
+		t.Fatal(err)
+	}
+	if a.Count != 4 || a.TimeoutMS != 1000 || a.Size != 64 {
+		t.Errorf("defaults = %+v, want count 4 timeout 1000 size 64", a)
 	}
 }

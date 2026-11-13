@@ -47,9 +47,12 @@ const usage = `usage: opticore [-env-file path] <command> [args]
   task <serial|id> get [path]...        no path: every parameter
   task <serial|id> set <path> <value> [type]
   task <serial|id> reboot
+  task <serial|id> ping <host>          IPPingDiagnostics; result after 8 DIAGNOSTICS COMPLETE
+  task <serial|id> revert <taskId>       re-set the values the task overwrote
   jobs [--json]
   job <id> [--json]
   job cancel <id>
+  job revert <id>                       revert every done set task of the job
   wake <serial|id>
   logs [-n N] [-f]                      tail the daemon log (OPTICORE_LOG_FILE)
   token create <name> --scope read,write[,reveal]
@@ -616,9 +619,26 @@ func cmdTasks(ctx context.Context, args []string) error {
 
 func cmdTask(ctx context.Context, args []string) error {
 	if len(args) < 2 {
-		return errors.New("usage: task <serial|id> get [path]... | set <path> <value> [type] | reboot")
+		return errors.New("usage: task <serial|id> get [path]... | set <path> <value> [type] | reboot | ping <host> | revert <taskId>")
 	}
 	dev, name, rest := args[0], args[1], args[2:]
+	if name == "revert" {
+		if len(rest) != 1 {
+			return errors.New("usage: task <serial|id> revert <taskId>")
+		}
+		id, err := strconv.ParseInt(rest[0], 10, 64)
+		if err != nil {
+			return errors.New("task id must be an integer")
+		}
+		return withStore(ctx, func(st *store.Store, cfg config.Config) error {
+			svc := service(st, cfg)
+			out, err := svc.RevertTask(ctx, dev, id, nil)
+			if err != nil {
+				return err
+			}
+			return queued(ctx, svc, out)
+		})
+	}
 	var t store.NewTask
 	switch name {
 	case "get":
@@ -631,19 +651,37 @@ func cmdTask(ctx context.Context, args []string) error {
 		t = store.NewTask{Name: "set", Args: mustJSON(acs.SetArgs{Values: [][]string{rest}})}
 	case "reboot":
 		t = store.NewTask{Name: "reboot"}
+	case "ping":
+		if len(rest) != 1 {
+			return errors.New("usage: task <serial|id> ping <host>")
+		}
+		t = store.NewTask{Name: "ping", Args: mustJSON(acs.PingArgs{Host: rest[0]})}
 	default:
 		return fmt.Errorf("unknown task %q", name)
 	}
 	return withStore(ctx, func(st *store.Store, cfg config.Config) error {
-		out, err := service(st, cfg).Enqueue(ctx, dev, []store.NewTask{t})
+		svc := service(st, cfg)
+		out, err := svc.Enqueue(ctx, dev, []store.NewTask{t})
 		if err != nil {
 			return err
 		}
-		for _, t := range out {
-			fmt.Printf("queued task %d (%s) for %s\n", t.ID, t.Name, t.DeviceID)
-		}
-		return nil
+		return queued(ctx, svc, out)
 	})
+}
+
+// queued prints the queued tasks and wakes the device synchronously:
+// Enqueue's coalesced wake fires after the CLI process has already exited.
+func queued(ctx context.Context, svc *acs.Service, out []store.Task) error {
+	for _, t := range out {
+		fmt.Printf("queued task %d (%s) for %s\n", t.ID, t.Name, t.DeviceID)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	if err := svc.Wake(ctx, out[0].DeviceID); err != nil {
+		fmt.Fprintf(os.Stderr, "wake failed, the task runs at the next inform: %v\n", err)
+	}
+	return nil
 }
 
 func cmdJobs(ctx context.Context, args []string) error {
@@ -722,8 +760,26 @@ func cmdJob(ctx context.Context, args []string) error {
 			return nil
 		})
 	}
+	if len(pos) == 2 && pos[0] == "revert" {
+		id, err := strconv.ParseInt(pos[1], 10, 64)
+		if err != nil {
+			return errors.New("job id must be an integer")
+		}
+		return withStore(ctx, func(st *store.Store, cfg config.Config) error {
+			svc := service(st, cfg)
+			job, tasks, err := svc.RevertJob(ctx, id)
+			if err != nil {
+				return err
+			}
+			if err := svc.PumpJobs(ctx); err != nil {
+				return err
+			}
+			fmt.Printf("job %d reverts job %d with %d task(s)\n", job.ID, id, len(tasks))
+			return nil
+		})
+	}
 	if len(pos) != 1 {
-		return errors.New("usage: job <id> [--json] | job cancel <id>")
+		return errors.New("usage: job <id> [--json] | job cancel <id> | job revert <id>")
 	}
 	id, err := strconv.ParseInt(pos[0], 10, 64)
 	if err != nil {
