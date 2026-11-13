@@ -110,13 +110,15 @@ OPTICORE_API_ADDR=:8081
 ENV
 
 chmod 600 .env
-set -a; . ./.env; set +a
 opticore migrate      # schema; `serve` also does this on start
 opticore serve
 ```
 
-With the container, pass those variables with `-e` instead and skip
-`migrate`.
+The CLI loads `./.env` itself; no `source` step. Point it elsewhere with
+`-env-file /etc/opticore/.env` (or `OPTICORE_ENV_FILE`), which every subcommand
+accepts before or after the command name. With the container, pass the same
+variables with `-e` instead: real environment variables always win over the
+file, and `migrate` is unnecessary because `serve` applies migrations.
 
 Then create an API token and point a device at the ACS:
 
@@ -131,8 +133,17 @@ credentials so it can wake the device later.
 
 ## Configuration
 
-Every setting is an environment variable; the daemon reads nothing else.
-Values in parentheses are defaults.
+Every setting is an environment variable. Values in parentheses are defaults.
+
+The CLI reads a dotenv file before anything else, in this order:
+
+1. `-env-file path` (must exist),
+2. `$OPTICORE_ENV_FILE` (must exist),
+3. `./.env` (optional),
+4. `.env` in the directory of the `opticore` binary (optional).
+
+Variables already present in the environment are never overridden, so a systemd
+unit, a container, or a one-off `FOO=1 opticore serve` behaves as written.
 
 ### Required
 
@@ -341,6 +352,7 @@ task as JSON.
 ## CLI
 
 ```
+opticore [-env-file path] <command>            path defaults to ./.env
 opticore serve                                 run the daemon
 opticore migrate                               apply migrations
 opticore devices [--serial P] [--class C]      list devices

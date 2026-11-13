@@ -30,7 +30,10 @@ import (
 // version is set at build time: -ldflags "-X main.version=v1.2.3".
 var version = "dev"
 
-const usage = `usage: opticore <command> [args]
+const usage = `usage: opticore [-env-file path] <command> [args]
+
+  The daemon reads ./.env, or .env beside the binary, unless -env-file (or
+  $OPTICORE_ENV_FILE) names another file. Real environment variables win.
 
   serve                                 run the daemon
   migrate                               apply database migrations
@@ -49,15 +52,23 @@ const usage = `usage: opticore <command> [args]
 `
 
 func main() {
-	if len(os.Args) < 2 {
+	args, path, err := splitEnvFile(os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "opticore:", err)
+		os.Exit(2)
+	}
+	if _, err := config.LoadEnvFile(path); err != nil {
+		fmt.Fprintln(os.Stderr, "opticore:", err)
+		os.Exit(1)
+	}
+	if len(args) < 1 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	var err error
-	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
+	switch cmd, args := args[0], args[1:]; cmd {
 	case "serve":
 		err = serve(ctx)
 	case "migrate":
@@ -93,6 +104,31 @@ func main() {
 		fmt.Fprintln(os.Stderr, "opticore:", err)
 		os.Exit(1)
 	}
+}
+
+// splitEnvFile removes -env-file/--env-file from the arguments, so it can sit
+// before or after the subcommand. The last occurrence wins.
+func splitEnvFile(args []string) (rest []string, path string, err error) {
+	rest = make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "-env-file" || a == "--env-file":
+			if i+1 >= len(args) {
+				return nil, "", fmt.Errorf("%s needs a path", a)
+			}
+			i++
+			path = args[i]
+		case strings.HasPrefix(a, "-env-file=") || strings.HasPrefix(a, "--env-file="):
+			path = a[strings.Index(a, "=")+1:]
+			if path == "" {
+				return nil, "", fmt.Errorf("%s needs a path", a)
+			}
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return rest, path, nil
 }
 
 func newLogger(level string) *slog.Logger {

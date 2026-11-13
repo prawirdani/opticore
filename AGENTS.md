@@ -5,11 +5,19 @@ CWMP (TR-069) ACS daemon. Go 1.26, PostgreSQL, stdlib `net/http`, pgx/v5, goose.
 ## Commands
 
 ```sh
-set -a; . ./.env; set +a      # every command needs the env; there is no config file
 make build                    # bin/opticore, version from git describe
 make test                     # SKIPS every database test silently
 make itest                    # the real suite: needs OPTICORE_TEST_DSN (set in .env)
-gofmt -l . && go vet ./...    # what CI checks besides the tests
+gofmt -l . && go vet ./...   # what CI checks besides the tests
+```
+
+The binary loads `./.env` by itself (`-env-file path` or `OPTICORE_ENV_FILE`
+for another file; real environment variables win). `go test` does **not**, so
+export the variables yourself before a DB suite unless CI-style env is already
+set:
+
+```sh
+set -a; . ./.env; set +a
 ```
 
 `make test` passing means little: `internal/store`, `internal/acs` and

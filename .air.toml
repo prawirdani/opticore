@@ -1,5 +1,6 @@
 # air: rebuild and restart the daemon on save.
-# Env comes from .env, injected by `make dev` (air does not read .env itself).
+# The binary loads ./.env itself; `make dev` adds OPTICORE_ENV_FILE when
+# ENV_FILE names another file. air does not read .env on its own.
 
 root = "."
 tmp_dir = "tmp"

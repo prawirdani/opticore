@@ -1,6 +1,8 @@
 # Opticore development tasks. Configuration comes from .env.
 
 ENV_FILE ?= .env
+# Point the binary at ENV_FILE only when it exists; otherwise real env wins.
+ENVSRC := $(if $(wildcard $(ENV_FILE)),OPTICORE_ENV_FILE=$(ENV_FILE))
 BIN      ?= bin/opticore
 TEST_DSN ?= postgres://postgres:pgdocker1337@localhost:5432/opticore_test?sslmode=disable
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -13,16 +15,16 @@ help: ## list targets
 
 dev: ## run the daemon with hot reload (air)
 	@command -v air >/dev/null || { echo "install: go install github.com/air-verse/air@latest"; exit 1; }
-	set -a; . ./$(ENV_FILE); set +a; air
+	$(ENVSRC) air
 
 serve: ## run the daemon once
-	set -a; . ./$(ENV_FILE); set +a; go run ./cmd/opticore serve
+	$(ENVSRC) go run ./cmd/opticore serve
 
 build: ## build the binary (version from git describe)
 	go build -ldflags "-X main.version=$(VERSION)" -o $(BIN) ./cmd/opticore
 
 migrate: build ## apply migrations
-	set -a; . ./$(ENV_FILE); set +a; $(BIN) migrate
+	$(ENVSRC) $(BIN) migrate
 
 db-test: ## create the test database if absent
 	@psql "$(TEST_DSN)" -c 'select 1' >/dev/null 2>&1 || \
