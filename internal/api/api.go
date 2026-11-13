@@ -113,6 +113,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/devices/{id}/tasks", s.listTasks)
 	mux.HandleFunc("GET /v1/devices/{id}/events", s.listEvents)
 	mux.HandleFunc("GET /v1/tasks/{taskId}", s.getTask)
+	mux.HandleFunc("POST /v1/jobs", s.createJob)
+	mux.HandleFunc("GET /v1/jobs", s.listJobs)
+	mux.HandleFunc("GET /v1/jobs/{id}", s.getJob)
+	mux.HandleFunc("DELETE /v1/jobs/{id}", s.cancelJob)
 	mux.HandleFunc("GET /v1/events", s.streamEvents)
 
 	var h http.Handler = mux

@@ -45,11 +45,6 @@ func (s *Store) CreateTasks(ctx context.Context, deviceIDorSerial string, tasks 
 	if len(tasks) == 0 {
 		return []Task{}, nil
 	}
-	floor := s.TaskExpiry
-	if floor <= 0 {
-		floor = 10 * time.Minute
-	}
-
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: create tasks: %w", err)
@@ -70,7 +65,26 @@ func (s *Store) CreateTasks(ctx context.Context, deviceIDorSerial string, tasks 
 		batchID = &id
 	}
 
-	now := time.Now().UTC()
+	out, err := s.insertTasks(ctx, tx, deviceID, interval, batchID, tasks, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("store: create tasks: %w", err)
+	}
+	return out, nil
+}
+
+// insertTasks writes tasks for one device inside an existing transaction.
+// CreateTasks and CreateJob share it so expiry and argument handling cannot
+// diverge.
+func (s *Store) insertTasks(ctx context.Context, tx pgx.Tx, deviceID string, interval int,
+	batchID *string, tasks []NewTask, now time.Time) ([]Task, error) {
+	floor := s.TaskExpiry
+	if floor <= 0 {
+		floor = 10 * time.Minute
+	}
 	out := make([]Task, 0, len(tasks))
 	for i, t := range tasks {
 		if !taskNames[t.Name] {
@@ -110,10 +124,6 @@ func (s *Store) CreateTasks(ctx context.Context, deviceIDorSerial string, tasks 
 			return nil, fmt.Errorf("store: create task: %w", err)
 		}
 		out = append(out, task)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("store: create tasks: %w", err)
 	}
 	return out, nil
 }

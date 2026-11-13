@@ -80,7 +80,7 @@ func testStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Pool().Exec(ctx, `TRUNCATE tasks, events, devices RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := s.Pool().Exec(ctx, `TRUNCATE tasks, events, devices, jobs RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(s.Close)

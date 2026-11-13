@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/prawirdani/opticore/internal/store"
@@ -32,15 +33,29 @@ type ObjectArgs struct {
 	Path string `json:"path"`
 }
 
+// Waker is the subset of *wake.Waker the service needs. The seam lets tests
+// count wakes without an HTTP server.
+type Waker interface {
+	Request(t wake.Target)
+	Wake(ctx context.Context, t wake.Target) error
+}
+
 // Service creates tasks and wakes devices. It is shared by the CLI and,
 // later, the HTTP API, so validation and encryption cannot diverge.
 type Service struct {
 	Store  *store.Store
 	Key    []byte
-	Waker  *wake.Waker // nil: never wake
+	Waker  Waker // nil: never wake
 	Logger interface {
 		Warn(msg string, args ...any)
 	}
+
+	// PumpWindow suppresses re-waking a job task for this long. Zero means
+	// five minutes, roughly one CWMP session timeout.
+	PumpWindow time.Duration
+
+	pumpMu sync.Mutex
+	woken  map[int64]map[int64]time.Time // job id -> task id -> woken at
 }
 
 // ErrReservedPath rejects client writes to connection-request credentials,

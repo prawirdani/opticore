@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -36,6 +37,9 @@ const usage = `usage: opticore <command> [args]
   task <serial|id> get <path>...
   task <serial|id> set <path> <value> [type]
   task <serial|id> reboot
+  jobs [--json]
+  job <id> [--json]
+  job cancel <id>
   wake <serial|id>
   token create <name> --scope read,write[,reveal]
 `
@@ -62,6 +66,10 @@ func main() {
 		err = cmdTasks(ctx, args)
 	case "task":
 		err = cmdTask(ctx, args)
+	case "jobs":
+		err = cmdJobs(ctx, args)
+	case "job":
+		err = cmdJob(ctx, args)
 	case "wake":
 		err = cmdWake(ctx, args)
 	case "token":
@@ -112,7 +120,8 @@ func serve(ctx context.Context) error {
 	log.Info("cwmp device security", "allow_cidrs", len(cfg.CWMPAllowCIDRs),
 		"cr_url_match_source", cfg.CWMPCRMatchSource, "device_auth", cfg.CWMPAuthUsername != "")
 
-	svc := &acs.Service{Store: st, Key: cfg.SecretKey, Waker: wake.New(cfg.CWMPCRTimeout, log), Logger: log}
+	svc := &acs.Service{Store: st, Key: cfg.SecretKey, Waker: wake.New(cfg.CWMPCRTimeout, log), Logger: log,
+		PumpWindow: cfg.CWMPSessionTimeout}
 	sessions := &acs.Sessions{
 		Store: st, Svc: svc, Key: cfg.SecretKey, Logger: log,
 		GPVBatch: cfg.CWMPGPVBatch, MaxAttempts: cfg.TaskMaxAttempts,
@@ -179,7 +188,7 @@ func serve(ctx context.Context) error {
 
 	janitorCtx, cancelJanitor := context.WithCancel(ctx)
 	defer cancelJanitor()
-	go janitor(janitorCtx, st, log, cfg.TaskRetention, cfg.EventRetention)
+	go janitor(janitorCtx, st, svc, log, cfg.TaskRetention, cfg.EventRetention)
 
 	errc := make(chan error, 2)
 	go func() { errc <- srv.ListenAndServe() }()
@@ -216,7 +225,7 @@ func health(w http.ResponseWriter, r *http.Request, st *store.Store) {
 	json.NewEncoder(w).Encode(out)
 }
 
-func janitor(ctx context.Context, st *store.Store, log *slog.Logger, taskRetention, eventRetention time.Duration) {
+func janitor(ctx context.Context, st *store.Store, svc *acs.Service, log *slog.Logger, taskRetention, eventRetention time.Duration) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	var lastPurge time.Time
@@ -229,6 +238,9 @@ func janitor(ctx context.Context, st *store.Store, log *slog.Logger, taskRetenti
 				log.Error("janitor: expire tasks", "err", err)
 			} else if n > 0 {
 				log.Info("janitor: expired tasks", "count", n)
+			}
+			if err := svc.PumpJobs(ctx); err != nil {
+				log.Error("janitor: pump jobs", "err", err)
 			}
 			if now.Sub(lastPurge) < time.Hour {
 				continue
@@ -433,6 +445,133 @@ func cmdTask(ctx context.Context, args []string) error {
 		}
 		for _, t := range out {
 			fmt.Printf("queued task %d (%s) for %s\n", t.ID, t.Name, t.DeviceID)
+		}
+		return nil
+	})
+}
+
+func cmdJobs(ctx context.Context, args []string) error {
+	fl, _ := split(args)
+	fs := flag.NewFlagSet("jobs", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "JSON output")
+	if err := fs.Parse(fl); err != nil {
+		return err
+	}
+	return withStore(ctx, func(st *store.Store, _ config.Config) error {
+		jobs, err := st.ListJobs(ctx, 100)
+		if err != nil {
+			return err
+		}
+		rows := make([]jobRow, 0, len(jobs))
+		for _, j := range jobs {
+			counts, err := st.JobCounts(ctx, j.ID)
+			if err != nil {
+				return err
+			}
+			rows = append(rows, newJobRow(j, counts, nil))
+		}
+		if *asJSON {
+			return printJSON(rows)
+		}
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "ID\tNAME\tSTATUS\tDONE\tFAILED\tRUNNING\tPENDING\tTOTAL\tCREATED")
+		for _, r := range rows {
+			fmt.Fprintf(w, "%d\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s\n", r.ID, r.Name, r.Status,
+				r.Counts["done"], r.Counts["failed"], r.Counts["running"], r.Counts["pending"],
+				r.Counts["total"], r.CreatedAt.Local().Format("01-02 15:04:05"))
+		}
+		return w.Flush()
+	})
+}
+
+type jobRow struct {
+	ID          int64              `json:"id"`
+	Name        string             `json:"name"`
+	Status      string             `json:"status"`
+	MaxParallel int                `json:"max_parallel"`
+	CreatedAt   time.Time          `json:"created_at"`
+	Counts      map[string]int     `json:"counts"`
+	Failures    []store.JobFailure `json:"failures,omitempty"`
+}
+
+func newJobRow(j store.Job, counts map[string]int, failures []store.JobFailure) jobRow {
+	total := 0
+	for _, n := range counts {
+		total += n
+	}
+	counts["total"] = total
+	return jobRow{
+		ID: j.ID, Name: j.Name, Status: j.Status, MaxParallel: j.MaxParallel,
+		CreatedAt: j.CreatedAt, Counts: counts, Failures: failures,
+	}
+}
+
+func cmdJob(ctx context.Context, args []string) error {
+	fl, pos := split(args)
+	fs := flag.NewFlagSet("job", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "JSON output")
+	if err := fs.Parse(fl); err != nil {
+		return err
+	}
+	if len(pos) == 2 && pos[0] == "cancel" {
+		id, err := strconv.ParseInt(pos[1], 10, 64)
+		if err != nil {
+			return errors.New("job id must be an integer")
+		}
+		return withStore(ctx, func(st *store.Store, _ config.Config) error {
+			if err := st.CancelJob(ctx, id); err != nil {
+				return err
+			}
+			fmt.Printf("job %d cancelled\n", id)
+			return nil
+		})
+	}
+	if len(pos) != 1 {
+		return errors.New("usage: job <id> [--json] | job cancel <id>")
+	}
+	id, err := strconv.ParseInt(pos[0], 10, 64)
+	if err != nil {
+		return errors.New("job id must be an integer")
+	}
+	return withStore(ctx, func(st *store.Store, _ config.Config) error {
+		job, err := st.GetJob(ctx, id)
+		if err != nil {
+			return err
+		}
+		counts, err := st.JobCounts(ctx, id)
+		if err != nil {
+			return err
+		}
+		failures, err := st.JobFailures(ctx, id)
+		if err != nil {
+			return err
+		}
+		row := newJobRow(job, counts, failures)
+		if *asJSON {
+			return printJSON(row)
+		}
+		fmt.Printf("id: %d\nname: %s\nstatus: %s\nmax parallel: %d\ncreated: %s\n",
+			row.ID, row.Name, row.Status, row.MaxParallel, row.CreatedAt.Format(time.RFC3339))
+		statuses := make([]string, 0, len(row.Counts))
+		for s := range row.Counts {
+			if s != "total" {
+				statuses = append(statuses, s)
+			}
+		}
+		slices.Sort(statuses)
+		fmt.Println("progress:")
+		for _, s := range statuses {
+			fmt.Printf("  %s: %d\n", s, row.Counts[s])
+		}
+		if len(row.Failures) > 0 {
+			fmt.Println("failures:")
+			for _, f := range row.Failures {
+				code := "-"
+				if f.FaultCode != nil {
+					code = strconv.Itoa(*f.FaultCode)
+				}
+				fmt.Printf("  %s task %d: %s %s\n", f.DeviceID, f.TaskID, code, f.Fault)
+			}
 		}
 		return nil
 	})
