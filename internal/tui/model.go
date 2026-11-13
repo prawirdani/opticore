@@ -168,6 +168,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.det.tasks = msg.tasks
 		m.det.events = msg.events
 		if msg.params != nil {
+			m.det.takeCache(msg.params)
 			m.det.pages[""] = buildPage(msg.params, "")
 			m.det.rebuild()
 		}
@@ -360,6 +361,8 @@ func (m *model) activeFilter() *filter {
 		return &m.task.filter
 	case scrJobs:
 		return &m.jobs.filter
+	case scrDevice:
+		return &m.det.filter
 	}
 	return nil
 }
@@ -373,6 +376,8 @@ func (m *model) refilterRows() {
 		m.task.refilter()
 	case scrJobs:
 		m.jobs.refilter()
+	case scrDevice:
+		m.det.rebuild()
 	}
 }
 
@@ -533,6 +538,9 @@ func (m *model) openJob() tea.Cmd {
 }
 
 func (m *model) detailToggle() tea.Cmd {
+	if m.det.filtering() {
+		return nil // the search tree is already fully open
+	}
 	row, ok := m.det.selectedRow()
 	if !ok || !row.object {
 		return nil
@@ -643,6 +651,12 @@ func queuedStatus(verb string, tasks []store.Task) string {
 func (m *model) back() tea.Cmd {
 	switch m.screen {
 	case scrDevice:
+		if m.det.filtering() || m.det.filter.text != "" {
+			m.det.filter.text = ""
+			m.det.filter.editing = false
+			m.det.rebuild()
+			return nil
+		}
 		if m.det.collapse() {
 			return nil
 		}

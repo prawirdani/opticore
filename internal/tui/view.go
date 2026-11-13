@@ -174,7 +174,7 @@ func (m model) helpLine() string {
 	var s string
 	switch m.screen {
 	case scrDevice:
-		s = "↑↓ move  ·  enter expand  ·  esc/⌫ back  ·  w wake  ·  b reboot  ·  x reset  ·  r refresh now  ·  q quit"
+		s = "↑↓ move  ·  enter expand  ·  / filter params  ·  esc/⌫ back  ·  w wake  ·  b reboot  ·  x reset  ·  r refresh  ·  q quit"
 	case scrTasks:
 		s = "↑↓ move  ·  s status  ·  / filter  ·  esc/⌫ back  ·  r refresh now  ·  1/2/3 screens  ·  q quit"
 	case scrJobs:

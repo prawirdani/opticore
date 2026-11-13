@@ -571,7 +571,7 @@ time is always shown.
 | `↑ ↓` / `j k`, `g G` | move, jump to ends |
 | `Enter` | open a device or job; expand one parameter level |
 | `Esc` / `Backspace` | collapse a level, then back to the list; cancel a confirm. While typing a filter, `Backspace` deletes a character |
-| `/` | filter the rows: serial prefix, product class, version, freshness |
+| `/` | filter the rows: serial prefix, product class, version, freshness. On the device screen, filter cached parameter paths (substring, parents kept, match count in the header) |
 | `s` | cycle the task status filter (tasks screen) |
 | `r` | refresh now; the last refresh time is shown |
 | `w` | wake the selected device, after `y/n` |
@@ -579,8 +579,10 @@ time is always shown.
 | `1 2 3`, `Tab` | devices, tasks, jobs |
 | `q`, `Ctrl+C` | quit |
 
-Facts shown: serial, product class, software version, inform age (`fresh` within
-two inform intervals, `stale` within six, `offline` beyond), last address,
+The device screen puts the facts and the actions side by side — the actions
+move below them under 82 columns — so the parameter tree gets the width. Facts
+shown: serial, product class, software version, inform age (`fresh` within two
+inform intervals, `stale` within six, `offline` beyond), last address,
 whether connection-request credentials are set, cached parameters one level at
 a time, tasks with fault codes, events, and jobs with their per-device
 failures, including the values of secret leaves as stored.

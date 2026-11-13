@@ -1091,3 +1091,274 @@ func TestConfirmWarnsOnlyWhenDown(t *testing.T) {
 		t.Fatalf("down state blocked the action: %+v", f.queued)
 	}
 }
+
+func viewLines(m model) []string {
+	var out []string
+	for _, line := range strings.Split(m.View(), "\n") {
+		out = append(out, stripANSI(line))
+	}
+	return out
+}
+
+func lineIndex(lines []string, needle string) int {
+	for i, line := range lines {
+		if strings.Contains(line, needle) {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestDetailHeaderTwoColumns(t *testing.T) {
+	dev := device(1)
+	dev.LastAddr = "10.0.0.12:40312"
+	dev.CRSetAt = &testNow
+	f := &fake{
+		devices: []store.Device{dev},
+		params: map[string]map[string]store.Param{dev.ID: {
+			"InternetGatewayDevice.DeviceInfo.Manufacturer": {Value: "Huawei"},
+		}},
+	}
+	open := func(width int) model {
+		m := newTestModel(f)
+		m.w, m.h = width, 30
+		m = settle(t, m, m.Init()())
+		return press(t, m, keyEnter)
+	}
+
+	wide := viewLines(open(120))
+	paramsWide := lineIndex(wide, "PARAMETERS")
+	actionsLine := lineIndex(wide, "ACTIONS")
+	if actionsLine < 0 || paramsWide < 0 {
+		t.Fatalf("missing blocks at 120:\n%s", strings.Join(wide, "\n"))
+	}
+	if !strings.HasPrefix(wide[actionsLine], "id ") {
+		t.Fatalf("actions are not beside the facts at 120: %q", wide[actionsLine])
+	}
+	if wake := lineIndex(wide, "wake"); wake < 0 || !strings.Contains(wide[wake], "serial") {
+		t.Fatalf("actions are not on the facts' rows at 120: %q", wide[wake])
+	}
+	actionsCol := strings.Index(wide[actionsLine], "ACTIONS")
+	if actionsCol <= 0 || actionsCol >= 60 {
+		t.Fatalf("actions column %d is not bounded at 120", actionsCol)
+	}
+
+	// A longer id must not move the actions column or the parameters block.
+	long := device(1)
+	long.ID = "00AABB-HG8245H5-48575443BD7589AB"
+	fl := &fake{devices: []store.Device{long}}
+	ml := newTestModel(fl)
+	ml.w, ml.h = 120, 30
+	ml = settle(t, ml, ml.Init()())
+	ml = press(t, ml, keyEnter)
+	longLines := viewLines(ml)
+	longActions := lineIndex(longLines, "ACTIONS")
+	if longActions < 0 {
+		t.Fatalf("no ACTIONS with a long id:\n%s", strings.Join(longLines, "\n"))
+	}
+	if got := strings.Index(longLines[longActions], "ACTIONS"); got != actionsCol {
+		t.Fatalf("actions column moved with a longer id: %d -> %d", actionsCol, got)
+	}
+	if got := lineIndex(longLines, "PARAMETERS"); got != paramsWide {
+		t.Fatalf("parameters moved with a longer id: %d -> %d", paramsWide, got)
+	}
+
+	narrow := viewLines(open(80))
+	paramsNarrow := lineIndex(narrow, "PARAMETERS")
+	actionsNarrow := lineIndex(narrow, "ACTIONS")
+	if actionsNarrow < 0 || paramsNarrow < 0 {
+		t.Fatalf("missing blocks at 80:\n%s", strings.Join(narrow, "\n"))
+	}
+	for _, line := range narrow {
+		if strings.Contains(line, "ACTIONS") && strings.Contains(line, "ONT0001") {
+			t.Fatalf("actions still beside the facts at 80: %q", line)
+		}
+	}
+	if actionsNarrow <= lineIndex(narrow, "last fault") {
+		t.Fatalf("actions are not below the facts at 80: actions=%d", actionsNarrow)
+	}
+	if wake := lineIndex(narrow, "wake"); wake <= actionsNarrow {
+		t.Fatalf("wake row is not under ACTIONS at 80: %q", narrow[wake])
+	}
+	if paramsNarrow <= paramsWide {
+		t.Fatalf("parameters start at %d at 80 and %d at 120: stacked must be lower", paramsNarrow, paramsWide)
+	}
+}
+
+func TestDetailHeaderWidthsStable(t *testing.T) {
+	dev := device(1)
+	dev.LastAddr = "10.0.0.12"
+	f := &fake{devices: []store.Device{dev}}
+	m := newTestModel(f)
+	m.w, m.h = 120, 30
+	m = settle(t, m, m.Init()())
+	m = press(t, m, keyEnter)
+
+	before := viewLines(m)
+	beforeParams := lineIndex(before, "PARAMETERS")
+	beforeActions := lineIndex(before, "ACTIONS")
+	beforeCol := strings.Index(before[beforeActions], "ACTIONS")
+
+	// A longer address and a stale device move values, not columns.
+	f.devices[0].LastAddr = "203.0.113.250:65535"
+	f.devices[0].LastInform = testNow.Add(-30 * time.Minute)
+	m = press(t, m, typed("r"))
+
+	after := viewLines(m)
+	if got := lineIndex(after, "PARAMETERS"); got != beforeParams {
+		t.Fatalf("parameters moved: %d -> %d", beforeParams, got)
+	}
+	afterActions := lineIndex(after, "ACTIONS")
+	if afterActions != beforeActions {
+		t.Fatalf("actions row moved: %d -> %d", beforeActions, afterActions)
+	}
+	if got := strings.Index(after[afterActions], "ACTIONS"); got != beforeCol {
+		t.Fatalf("actions column moved: %d -> %d", beforeCol, got)
+	}
+	if !strings.Contains(after[lineIndex(after, "addr")], "203.0.113.250:65535") {
+		t.Fatal("address did not update")
+	}
+}
+
+func paramFilterFixture(t *testing.T) (*fake, model) {
+	t.Helper()
+	dev := device(1)
+	f := &fake{
+		devices: []store.Device{dev},
+		params: map[string]map[string]store.Param{dev.ID: {
+			"InternetGatewayDevice.DeviceInfo.Manufacturer":                      {Value: "Huawei"},
+			"InternetGatewayDevice.DeviceInfo.SoftwareVersion":                   {Value: "V5R020C10S271"},
+			"InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID":         {Value: "Home"},
+			"InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey": {Value: "hunter2"},
+			"InternetGatewayDevice.ManagementServer.URL":                         {Value: "http://acs:7547/"},
+		}},
+	}
+	m := newTestModel(f)
+	m.w, m.h = 120, 40
+	m = settle(t, m, m.Init()())
+	m = press(t, m, keyEnter)
+	return f, m
+}
+
+func TestDetailParamFilter(t *testing.T) {
+	_, m := paramFilterFixture(t)
+
+	m = press(t, m, typed("/"))
+	if !m.det.filter.editing {
+		t.Fatal("/ did not start the parameter filter")
+	}
+	m = press(t, m, typed("wlan"))
+
+	view := m.View()
+	if !strings.Contains(view, "PARAMETERS  2 of 5  /wlan") {
+		t.Fatalf("match count missing:\n%s", view)
+	}
+	if !strings.Contains(view, "SSID") || !strings.Contains(view, "PreSharedKey") {
+		t.Fatalf("matching leaves missing:\n%s", view)
+	}
+	if strings.Contains(view, "Manufacturer") {
+		t.Fatalf("non-matching leaf shown:\n%s", view)
+	}
+	for _, parent := range [...]string{"InternetGatewayDevice", "LANDevice", "WLANConfiguration"} {
+		if !strings.Contains(stripANSI(view), parent) {
+			t.Fatalf("parent %q not kept:\n%s", parent, view)
+		}
+	}
+	m = press(t, m, keyEnter) // keep the filter
+	if m.det.filter.text != "wlan" || m.det.filter.editing {
+		t.Fatalf("enter did not keep the filter: %q editing=%v", m.det.filter.text, m.det.filter.editing)
+	}
+	rows := len(m.det.rows)
+	m = press(t, m, keyEnter) // no expansion while searching
+	if len(m.det.rows) != rows {
+		t.Fatal("enter changed the tree while filtering")
+	}
+	for i := 0; i < 8; i++ {
+		m = press(t, m, keyDown)
+		if m.det.cur.pos >= len(m.det.rows) {
+			t.Fatalf("cursor %d outside %d rows", m.det.cur.pos, len(m.det.rows))
+		}
+	}
+
+	m = press(t, m, keyEsc)
+	if m.det.filter.text != "" || m.det.filtering() {
+		t.Fatalf("esc did not restore the tree: %q", m.det.filter.text)
+	}
+	if len(m.det.rows) != 1 {
+		t.Fatalf("full tree after clearing: %d rows, want 1", len(m.det.rows))
+	}
+	if strings.Contains(m.View(), " of 5 ") {
+		t.Fatal("match count survived the clear")
+	}
+}
+
+func TestDetailParamFilterNoMatch(t *testing.T) {
+	_, m := paramFilterFixture(t)
+	m = press(t, m, typed("/"))
+	m = press(t, m, typed("zzz"))
+	view := m.View()
+	if !strings.Contains(view, `no parameter matches "zzz"`) {
+		t.Fatalf("empty match state missing:\n%s", view)
+	}
+	if m.det.cur.pos != 0 {
+		t.Fatalf("cursor outside the empty list: %d", m.det.cur.pos)
+	}
+	m = press(t, m, keyEsc)
+	if len(m.det.rows) != 1 {
+		t.Fatalf("esc did not restore: %d rows", len(m.det.rows))
+	}
+}
+
+func TestDetailParamFilterEmptyCache(t *testing.T) {
+	d := device(1)
+	f := &fake{devices: []store.Device{d}}
+	m := newTestModel(f)
+	m.w, m.h = 120, 30
+	m = settle(t, m, m.Init()())
+	m = press(t, m, keyEnter)
+	m = press(t, m, typed("/"))
+	if !m.det.filter.editing {
+		t.Fatal("filter did not open without cached params")
+	}
+	m = press(t, m, typed("wlan"))
+	if !strings.Contains(m.View(), "no cached parameters to search") {
+		t.Fatalf("empty cache state missing:\n%s", m.View())
+	}
+}
+
+func TestDetailParamFilterKeepsSelectionWhenVisible(t *testing.T) {
+	f, m := paramFilterFixture(t)
+	dev := f.devices[0]
+	for _, prefix := range []string{
+		"InternetGatewayDevice.",
+		"InternetGatewayDevice.LANDevice.",
+		"InternetGatewayDevice.LANDevice.1.",
+		"InternetGatewayDevice.LANDevice.1.WLANConfiguration.",
+		"InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.",
+	} {
+		m.det.expanded[prefix] = true
+		m.det.pages[prefix] = buildPage(f.params[dev.ID], prefix)
+	}
+	m.det.rebuild()
+
+	const ssid = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID"
+	m.det.selectPrefix(ssid)
+	if row, ok := m.det.selectedRow(); !ok || row.prefix != ssid {
+		t.Fatalf("fixture cursor: %+v", row)
+	}
+
+	m = press(t, m, typed("/"))
+	m = press(t, m, typed("ssid"))
+	m = press(t, m, keyEnter) // keep
+	if row, ok := m.det.selectedRow(); !ok || row.prefix != ssid {
+		t.Fatalf("filter lost the selection: %+v", row)
+	}
+
+	m = press(t, m, keyEsc) // clear the filter
+	if m.det.filter.text != "" {
+		t.Fatalf("filter not cleared: %q", m.det.filter.text)
+	}
+	if row, ok := m.det.selectedRow(); !ok || row.prefix != ssid {
+		t.Fatalf("clearing the filter lost the visible selection: %+v", row)
+	}
+}
