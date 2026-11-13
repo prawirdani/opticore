@@ -424,12 +424,20 @@ and nothing else. Pushing that tag:
 
 ## Not implemented yet
 
-- Rollback: per-task or per-job revert from `prev`.
-- Firmware `download`, upload and the file server.
-- `ping` (UDP `EchoRequest`).
-- `ScheduleInform` / `ScheduleDownload`.
-- SSE events for job transitions, and creating jobs from the CLI.
-- A TUI.
+These come before the `v0.1.0` tag:
+
+- Per-leaf rollback: a `set` does not record `prev` yet, so there is no revert.
+- Firmware: upload, the file server on `8082`, the `download` task and
+  `TransferComplete`.
+- `ping` (`IPPingDiagnostics`).
+- `token list` and `token revoke`.
+- Job transitions on SSE, and creating a job from the CLI.
+- The public Go SDK in `client/`; the hook handler is `internal/hook` for now.
+- The TUI.
+
+Out of scope on purpose: `ScheduleInform`, `ScheduleDownload`, `Upload`,
+parameter attributes and notification flags, TLS on the CWMP port, clustering,
+multi-tenancy, USP and TR-181-specific handling.
 
 ## Layout
 
