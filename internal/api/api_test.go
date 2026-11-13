@@ -819,3 +819,21 @@ func TestDeviceCursorPagination(t *testing.T) {
 		t.Errorf("filtered = %+v", filtered)
 	}
 }
+
+// OPTICORE_API_AUTH=false: no token, any client, reveal included.
+func TestNoAuth(t *testing.T) {
+	st := testStore(t)
+	_, ts, _ := newTestServer(t, st, Options{NoAuth: true, RequireRevealScope: true})
+
+	resp := request(t, ts.Client(), http.MethodGet, ts.URL+"/v1/devices", "", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/devices without a token = %d, want 200", resp.StatusCode)
+	}
+	// A write without a token must reach the handler, not be stopped by auth.
+	res := request(t, ts.Client(), http.MethodPost, ts.URL+"/v1/devices/x/tasks", "", map[string]int{"nope": 1})
+	res.Body.Close()
+	if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden {
+		t.Fatalf("POST without a token = %d, auth still enforced", res.StatusCode)
+	}
+}

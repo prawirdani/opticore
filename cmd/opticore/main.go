@@ -173,6 +173,7 @@ func serve(ctx context.Context) error {
 	}
 
 	apiSrv := api.New(st, svc, cfg.SecretKey, log, api.Options{
+		NoAuth:             !cfg.APIAuth,
 		AllowInsecureLocal: cfg.APIInsecureLocal,
 		RequireRevealScope: cfg.APIRequireReveal,
 		ListenAddr:         cfg.APIAddr,
@@ -200,7 +201,13 @@ func serve(ctx context.Context) error {
 	go func() { errc <- srv.ListenAndServe() }()
 	go func() { errc <- apiHTTP.ListenAndServe() }()
 	log.Info("opticore listening", "cwmp", cfg.CWMPAddr, "api", cfg.APIAddr,
-		"api_auth", !cfg.APIInsecureLocal)
+		"api_auth", cfg.APIAuth && !cfg.APIInsecureLocal)
+	if !cfg.APIAuth {
+		log.Warn("API authentication is disabled: anyone who can reach the API listener can read devices and queue tasks",
+			"addr", cfg.APIAddr)
+	} else if cfg.APIInsecureLocal {
+		log.Warn("API authentication is disabled for loopback clients only", "addr", cfg.APIAddr)
+	}
 
 	select {
 	case err := <-errc:

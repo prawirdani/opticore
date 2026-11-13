@@ -114,6 +114,7 @@ Values in parentheses are defaults.
 | Variable | Default | Meaning |
 |---|---|---|
 | `OPTICORE_API_ADDR` | `:8081` | API listener |
+| `OPTICORE_API_AUTH` | `true` | require a bearer token on `/v1`; `false` disables API auth entirely |
 | `OPTICORE_API_INSECURE_LOCAL` | `false` | accept unauthenticated `/v1` from loopback only |
 | `OPTICORE_API_REQUIRE_REVEAL` | `true` | `?reveal=1` needs a token with the `reveal` scope |
 
@@ -322,6 +323,11 @@ directly and never applies DDL except `migrate`.
 - **`CWMP_AUTH_USERNAME` / `CWMP_AUTH_PASSWORD`** make devices authenticate with
   HTTP Digest (MD5, `qop=auth`, stateless signed nonces) or Basic. Set the same
   pair in the ONTs' `ManagementServer.Username` / `Password`.
+- **`OPTICORE_API_AUTH=false`** turns API auth off for every client, not just
+  loopback: anyone who can reach the API listener can read devices, queue
+  tasks and reveal secrets. The daemon logs a warning at startup. Use it only
+  behind a network boundary or on a throwaway instance; prefer
+  `OPTICORE_API_INSECURE_LOCAL=true` when only this host needs access.
 - **Secrets** are AES-256-GCM encrypted at rest and masked unless revealed with
   the `reveal` scope. `OPTICORE_SECRET_KEY` is the one thing you must back up
   alongside the database.

@@ -31,6 +31,7 @@ import (
 // Options tunes the API for the deployment. ListenAddr is the address the
 // caller will bind; New uses it to refuse AllowInsecureLocal off loopback.
 type Options struct {
+	NoAuth             bool // serve /v1 without any token; loopback or not
 	AllowInsecureLocal bool
 	RequireRevealScope bool
 	ListenAddr         string
@@ -132,7 +133,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {
-	if s.opts.AllowInsecureLocal {
+	if s.opts.NoAuth || s.opts.AllowInsecureLocal {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -183,7 +184,7 @@ func (s *Server) revealAllowed(r *http.Request) bool {
 	if r.URL.Query().Get("reveal") != "1" {
 		return false
 	}
-	if s.opts.AllowInsecureLocal {
+	if s.opts.NoAuth || s.opts.AllowInsecureLocal {
 		return true
 	}
 	if !s.opts.RequireRevealScope {

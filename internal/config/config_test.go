@@ -273,3 +273,20 @@ func TestCWMPSecurity(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestAPIAuthToggle(t *testing.T) {
+	cfg, err := Load(env(required()))
+	if err != nil || !cfg.APIAuth {
+		t.Fatalf("default APIAuth = %v, %v; want true", cfg.APIAuth, err)
+	}
+	m := required()
+	m["OPTICORE_API_AUTH"] = "false"
+	cfg, err = Load(env(m))
+	if err != nil || cfg.APIAuth {
+		t.Fatalf("OPTICORE_API_AUTH=false → %v, %v", cfg.APIAuth, err)
+	}
+	m["OPTICORE_API_AUTH"] = "maybe"
+	if _, err := Load(env(m)); err == nil || !strings.Contains(err.Error(), "OPTICORE_API_AUTH") {
+		t.Errorf("bogus value accepted: %v", err)
+	}
+}

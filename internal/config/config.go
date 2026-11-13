@@ -34,6 +34,7 @@ type Config struct {
 	FileAddr string
 
 	// API security.
+	APIAuth          bool // require a bearer token on /v1
 	APIInsecureLocal bool // accept unauthenticated /v1 on loopback only
 	APIRequireReveal bool // ?reveal=1 needs a token with the reveal scope
 	FirmwareDir      string
@@ -193,6 +194,7 @@ func Load(getenv func(string) string) (Config, error) {
 		CWMPAuthUsername:   l.str("CWMP_AUTH_USERNAME", ""),
 		CWMPAuthPassword:   l.str("CWMP_AUTH_PASSWORD", ""),
 		APIAddr:            l.addr("OPTICORE_API_ADDR", ":8081"),
+		APIAuth:            l.boolean("OPTICORE_API_AUTH", true),
 		APIInsecureLocal:   l.boolean("OPTICORE_API_INSECURE_LOCAL", false),
 		APIRequireReveal:   l.boolean("OPTICORE_API_REQUIRE_REVEAL", true),
 		FileAddr:           l.addr("OPTICORE_FILE_ADDR", ":8082"),
