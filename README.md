@@ -711,12 +711,18 @@ how cutover can work:
   credentials GenieACS does not know; GenieACS must re-set them.
 - Do not rely on reading `ManagementServer.URL` from the device: consumer ONTs
   report it as writable with no value.
-- Factory reset wipes the ACS URL on the device, but option 43 hands it back on
-  the next DHCP lease, so a reset device returns without a site visit. Verified
-  on a lab HG8145V5 and F670L (both sent `0 BOOTSTRAP`, `RetryCount 0`, within
-  seconds of the reset); a lab HG8245H5 did not come back at all. Check this per
-  ONT model before relying on it: a model that ignores option 43 stays dark
-  after a reset until someone points it at the ACS.
+- Factory reset wipes the ACS URL on the device; whatever source provisions
+  the URL (DHCP option 43, the OLT's OMCI profile, the firmware default) hands
+  it back. In the lab, two sources pointed at two ACSes: after a reset the
+  HG8145V5 and F670L bootstrapped to Opticore, then about 17 minutes later
+  bootstrapped to GenieACS, and the HG8245H5 went straight to GenieACS. Each
+  ACS then overwrote the other's connection-request credentials, which is why
+  Opticore's wakes started returning 401. Before a canary or cutover, make sure
+  exactly one source hands out an ACS URL, and that it is the intended one.
+- Two ACSes on one device fight over `ConnectionRequestUsername/Password`.
+  Opticore clears its stored credentials when a wake is refused, so it re-sets
+  them on the device's next Inform to Opticore, but that does not stop the other
+  ACS doing the same.
 - Order: one device, one PON port, one OLT (per-device URL or scoped option 43),
   then the site (port swap). Delete the old engine only after a parity window on
   every ONT model.
@@ -836,9 +842,9 @@ Resolved:
 
 Still open:
 
-1. Does option 43 override a per-device `ManagementServer.URL` on renewal, per
-   ONT model? Decides how canaries stick (§13). Not needed for a reset: option
-   43 wins there (§13).
+1. Which source hands the ACS URL to these ONTs (option 43, OMCI profile,
+   firmware default), and which wins after a reset and on renewal? In the lab
+   two sources pointed at two ACSes (§13). Decides how canaries stick.
 2. Source-address check vs ACS-side Digest for the Inform (§3): pick one before
    production rollout.
 3. Should Opticore push a fleet-wide `PeriodicInformInterval` itself (like the
