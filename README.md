@@ -239,10 +239,21 @@ batch). `args` by name:
 | `delete_object` | `{"path": "InternetGatewayDevice.X.3."}` |
 | `reboot` | `{}` |
 | `reset` | `{}` — factory reset |
+| `ping` | `{"host": "8.8.8.8", "count": 4, "timeout_ms": 1000, "size": 64, "interface": ""}` — only `host` is required |
 
 A `set` reads the old values with a `GetParameterValues` in the same session
-first and stores them in the task's `prev`, which is the raw material for a
-rollback.
+first and stores them in the task's `prev`. A revert queues a new `set` built
+from that `prev`: `POST /v1/devices/{id}/tasks/{taskId}/revert` for one done
+`set`, `POST /v1/jobs/{id}/revert` for every done `set` of a job, as a new job
+with the same `max_parallel`. Sealed values are reverted without being shown.
+
+A `ping` spans two sessions. Opticore sets `IPPingDiagnostics.` (TR-098) or
+`IP.Diagnostics.IPPing.` (TR-181) to `Requested`, and the task stays `running`.
+When the device informs `8 DIAGNOSTICS COMPLETE`, a `GetParameterValues` reads
+the result into the task:
+`{"state": "Complete", "success": 4, "failure": 0, "avg_ms": 3, "min_ms": 2, "max_ms": 5}`.
+Any state other than `Complete` fails the task; a ping that never completes
+expires with the task.
 
 A leaf whose last segment ends in `password`, `passphrase`, `secret`, `psk` or
 `key` (case-insensitive, `ParameterKey` excepted) is a secret: it is sealed
@@ -305,12 +316,14 @@ a retry returns the original rows instead of enqueueing again.
 | `GET /v1/tasks/{taskId}` | one task |
 | `POST /v1/devices/{id}/tasks` | queue tasks; `{name,args,run_at,expires_at}` or an array |
 | `DELETE /v1/devices/{id}/tasks/{taskId}` | cancel a pending task |
+| `POST /v1/devices/{id}/tasks/{taskId}/revert` | queue a `set` restoring a done `set`'s `prev` |
 | `POST /v1/devices/{id}/wake` | connection request now |
 | `DELETE /v1/devices/{id}` | forget a device; it re-registers if it informs again |
 | `POST /v1/jobs` | bulk job |
 | `GET /v1/jobs` | list jobs |
 | `GET /v1/jobs/{id}` | progress and the per-device failure list |
 | `DELETE /v1/jobs/{id}` | cancel: pending tasks become `cancelled`, running ones finish |
+| `POST /v1/jobs/{id}/revert` | new job reverting the job's done `set` tasks |
 | `GET /v1/events` | SSE stream |
 | `GET /healthz` | database reachability and the age of the newest Inform |
 
@@ -344,11 +357,13 @@ when no task of it is pending or running.
 
 ### SSE
 
-`GET /v1/events` streams Inform events and task transitions. Filter with
-`type=` and `device_id=`, and resume with `Last-Event-ID` (or
-`?last_event_id=`). Ids are `e<events.id>` for events and
-`t<task id>:<unix nano>` for task updates; each frame's data is the event or
-task as JSON.
+`GET /v1/events` streams Inform events, task transitions and job progress.
+Filter with `type=` (an event type, `task` or `job`) and `device_id=`, and
+resume with `Last-Event-ID` (or `?last_event_id=`). Ids are `e<events.id>` for
+events, `t<task id>:<unix nano>` for task updates and `j<job id>:<unix nano>`
+for jobs; each frame's data is the event, task or job as JSON. A `job` frame is
+the `GET /v1/jobs/{id}` body, sent when one of its tasks finishes and when the
+job is cancelled or done. `device_id=` leaves job frames out.
 
 ## CLI
 
@@ -362,7 +377,9 @@ opticore tasks <serial|id>                     task log
 opticore task <serial|id> get [path]...        no path: every parameter
 opticore task <serial|id> set <path> <value> [type]
 opticore task <serial|id> reboot
-opticore jobs | job <id> | job cancel <id>
+opticore task <serial|id> ping <host>
+opticore task <serial|id> revert <taskId>
+opticore jobs | job <id> | job cancel <id> | job revert <id>
 opticore wake <serial|id>
 opticore token create <name> --scope read,write[,reveal]
 opticore version
@@ -473,14 +490,12 @@ and nothing else. Pushing that tag:
 
 ## Not implemented yet
 
-These come before the `v0.1.0` tag:
+Planned, not built yet:
 
-- Per-leaf rollback: a `set` does not record `prev` yet, so there is no revert.
 - Firmware: upload, the file server on `8082`, the `download` task and
   `TransferComplete`.
-- `ping` (`IPPingDiagnostics`).
 - `token list` and `token revoke`.
-- Job transitions on SSE, and creating a job from the CLI.
+- Creating a job from the CLI.
 - The public Go SDK in `client/`; the hook handler is `internal/hook` for now.
 - Revealing a secret from the console, and creating jobs from it.
 
