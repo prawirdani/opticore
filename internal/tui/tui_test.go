@@ -459,27 +459,25 @@ func TestDetailExpandsOneLevelAndShowsStoredValues(t *testing.T) {
 	if m.screen != scrDevice {
 		t.Fatalf("enter did not open the device: %v", m.screen)
 	}
-	if len(m.det.rows) != 1 || !m.det.rows[0].object {
-		t.Fatalf("root level: %+v", m.det.rows)
-	}
-
-	m = press(t, m, keyEnter) // InternetGatewayDevice.
+	// The only root opens expanded, its children collapsed.
 	if !m.det.expanded["InternetGatewayDevice."] || len(m.det.rows) != 3 {
-		t.Fatalf("first level: expanded=%v rows=%+v", m.det.expanded, m.det.rows)
+		t.Fatalf("root level: expanded=%v rows=%+v", m.det.expanded, m.det.rows)
 	}
 
-	m = press(t, m, keyEnter) // DeviceInfo.
+	m = press(t, m, keyDown) // DeviceInfo
+	m = press(t, m, keyEnter)
 	if !m.det.expanded["InternetGatewayDevice.DeviceInfo."] || len(m.det.rows) != 5 {
-		t.Fatalf("second level: rows=%+v", m.det.rows)
+		t.Fatalf("first level: expanded=%v rows=%+v", m.det.expanded, m.det.rows)
 	}
 	view := m.View()
 	if !strings.Contains(view, "Manufacturer") || !strings.Contains(view, "Huawei") {
 		t.Fatalf("leaf not shown:\n%s", view)
 	}
-
-	for i := 0; i < 3; i++ { // DeviceInfo -> ManagementServer.
-		m = press(t, m, keyDown)
+	if strings.Contains(view, "v") && !strings.Contains(view, "Huawei") {
+		t.Fatal("leaf value missing")
 	}
+
+	m = press(t, m, typed("G")) // ManagementServer
 	m = press(t, m, keyEnter)
 	view = m.View()
 	if !strings.Contains(view, "hunter2") {
@@ -489,17 +487,17 @@ func TestDetailExpandsOneLevelAndShowsStoredValues(t *testing.T) {
 		t.Fatalf("stored value masked:\n%s", view)
 	}
 
-	m = press(t, m, keyEsc) // collapse ManagementServer.
+	m = press(t, m, keyEsc) // collapse ManagementServer
 	if m.det.expanded["InternetGatewayDevice.ManagementServer."] {
 		t.Fatal("esc did not collapse the leaf's parent")
 	}
-	m = press(t, m, keyBack) // backspace is esc: collapse the root object.
+	m = press(t, m, keyEsc) // collapse the root object
 	if m.det.expanded["InternetGatewayDevice."] || len(m.det.rows) != 1 {
-		t.Fatalf("backspace did not collapse to the root level: %v", m.det.expanded)
+		t.Fatalf("esc did not collapse to the root level: %v rows=%d", m.det.expanded, len(m.det.rows))
 	}
-	m = press(t, m, keyBack) // nothing left: back to the list.
+	m = press(t, m, keyEsc) // nothing left: back to the list
 	if m.screen != scrDevices {
-		t.Fatalf("backspace did not leave the detail: %v", m.screen)
+		t.Fatalf("esc did not leave the detail: %v", m.screen)
 	}
 }
 
@@ -704,8 +702,9 @@ func TestDetailRebootQueuesTask(t *testing.T) {
 	if m.status != "queued reboot #31 — device woken" || m.statusBad {
 		t.Fatalf("status: bad=%v %q", m.statusBad, m.status)
 	}
-	if !strings.Contains(m.View(), "#31 reboot") {
-		t.Fatalf("TASKS block was not refreshed:\n%s", m.View())
+	m = press(t, m, keyTab) // Tasks section
+	if !strings.Contains(stripANSI(m.View()), "#31 reboot") {
+		t.Fatalf("TASKS section was not refreshed:\n%s", m.View())
 	}
 	if len(f.woken) != 0 {
 		t.Fatalf("the console must not wake a task action itself: %v", f.woken)
@@ -761,8 +760,8 @@ func TestConfirmBlocksOtherKeys(t *testing.T) {
 	m = press(t, m, keyEnter)
 	m = press(t, m, typed("r"))
 	m = press(t, m, typed("/"))
-	if m.det.focus != focusParams {
-		t.Fatalf("a key moved the pane focus during a confirmation: %v", m.det.focus)
+	if m.det.section != sectionParams || m.det.filter.text != "" {
+		t.Fatalf("a key changed the section during a confirmation: %v %q", m.det.section, m.det.filter.text)
 	}
 	if m.confirm == nil {
 		t.Fatal("a non-y/n key closed the confirmation")
@@ -1022,9 +1021,8 @@ func TestServingFlipKeepsParameterTree(t *testing.T) {
 	}
 	m := boot(t, f)
 	m = press(t, m, keyEnter)
-	m = press(t, m, keyEnter)
 	if !m.det.expanded["InternetGatewayDevice."] || len(m.det.rows) != 2 {
-		t.Fatalf("tree did not expand: %v rows=%d", m.det.expanded, len(m.det.rows))
+		t.Fatalf("tree did not expand on open: %v rows=%d", m.det.expanded, len(m.det.rows))
 	}
 	rows := len(m.det.rows)
 
@@ -1131,7 +1129,7 @@ func TestDetailHeaderTwoColumns(t *testing.T) {
 	}
 
 	wide := viewLines(open(120))
-	paramsWide := lineIndex(wide, "PARAMETERS")
+	paramsWide := lineIndex(wide, "Parameters")
 	actionsLine := lineIndex(wide, "ACTIONS")
 	if actionsLine < 0 || paramsWide < 0 {
 		t.Fatalf("missing blocks at 120:\n%s", strings.Join(wide, "\n"))
@@ -1163,12 +1161,12 @@ func TestDetailHeaderTwoColumns(t *testing.T) {
 	if got := strings.Index(longLines[longActions], "ACTIONS"); got != actionsCol {
 		t.Fatalf("actions column moved with a longer id: %d -> %d", actionsCol, got)
 	}
-	if got := lineIndex(longLines, "PARAMETERS"); got != paramsWide {
+	if got := lineIndex(longLines, "Parameters"); got != paramsWide {
 		t.Fatalf("parameters moved with a longer id: %d -> %d", paramsWide, got)
 	}
 
 	narrow := viewLines(open(80))
-	paramsNarrow := lineIndex(narrow, "PARAMETERS")
+	paramsNarrow := lineIndex(narrow, "Parameters")
 	actionsNarrow := lineIndex(narrow, "ACTIONS")
 	if actionsNarrow < 0 || paramsNarrow < 0 {
 		t.Fatalf("missing blocks at 80:\n%s", strings.Join(narrow, "\n"))
@@ -1199,7 +1197,7 @@ func TestDetailHeaderWidthsStable(t *testing.T) {
 	m = press(t, m, keyEnter)
 
 	before := viewLines(m)
-	beforeParams := lineIndex(before, "PARAMETERS")
+	beforeParams := lineIndex(before, "Parameters")
 	beforeActions := lineIndex(before, "ACTIONS")
 	beforeCol := strings.Index(before[beforeActions], "ACTIONS")
 
@@ -1209,7 +1207,7 @@ func TestDetailHeaderWidthsStable(t *testing.T) {
 	m = press(t, m, typed("r"))
 
 	after := viewLines(m)
-	if got := lineIndex(after, "PARAMETERS"); got != beforeParams {
+	if got := lineIndex(after, "Parameters"); got != beforeParams {
 		t.Fatalf("parameters moved: %d -> %d", beforeParams, got)
 	}
 	afterActions := lineIndex(after, "ACTIONS")
@@ -1247,6 +1245,7 @@ func paramFilterFixture(t *testing.T) (*fake, model) {
 func TestDetailParamFilter(t *testing.T) {
 	_, m := paramFilterFixture(t)
 
+	full := len(m.det.rows)
 	m = press(t, m, typed("/"))
 	if !m.det.filter.editing {
 		t.Fatal("/ did not start the parameter filter")
@@ -1254,7 +1253,7 @@ func TestDetailParamFilter(t *testing.T) {
 	m = press(t, m, typed("wlan"))
 
 	view := m.View()
-	if !strings.Contains(view, "PARAMETERS  2 of 5  /wlan") {
+	if !strings.Contains(view, "Parameters  2 of 5  /wlan") {
 		t.Fatalf("match count missing:\n%s", view)
 	}
 	if !strings.Contains(view, "SSID") || !strings.Contains(view, "PreSharedKey") {
@@ -1288,8 +1287,8 @@ func TestDetailParamFilter(t *testing.T) {
 	if m.det.filter.text != "" || m.det.filtering() {
 		t.Fatalf("esc did not restore the tree: %q", m.det.filter.text)
 	}
-	if len(m.det.rows) != 1 {
-		t.Fatalf("full tree after clearing: %d rows, want 1", len(m.det.rows))
+	if len(m.det.rows) != full {
+		t.Fatalf("full tree after clearing: %d rows, want %d", len(m.det.rows), full)
 	}
 	if strings.Contains(m.View(), " of 5 ") {
 		t.Fatal("match count survived the clear")
@@ -1308,7 +1307,7 @@ func TestDetailParamFilterNoMatch(t *testing.T) {
 		t.Fatalf("cursor outside the empty list: %d", m.det.cur.pos)
 	}
 	m = press(t, m, keyEsc)
-	if len(m.det.rows) != 1 {
+	if m.det.filtering() || len(m.det.rows) == 0 {
 		t.Fatalf("esc did not restore: %d rows", len(m.det.rows))
 	}
 }
@@ -1372,11 +1371,15 @@ var (
 	keyShiftTab = tea.KeyMsg{Type: tea.KeyShiftTab}
 )
 
-// detailFixture opens the detail screen with n tasks and n events.
+// detailFixture opens the detail screen with n tasks (all failed) and n events,
+// plus one cached parameter branch.
 func detailFixture(t *testing.T, tasks, events int) (*fake, model) {
 	t.Helper()
 	dev := device(1)
-	f := &fake{devices: []store.Device{dev}}
+	f := &fake{devices: []store.Device{dev},
+		params: map[string]map[string]store.Param{dev.ID: {
+			"InternetGatewayDevice.DeviceInfo.Manufacturer": {Value: "Huawei"},
+		}}}
 	for i := 1; i <= tasks; i++ {
 		f.tasks = append(f.tasks, store.Task{ID: int64(i), DeviceID: dev.ID, Name: "set",
 			Status: "failed", Attempts: 2, FaultCode: intp(9003), Fault: "Invalid arguments",
@@ -1393,51 +1396,102 @@ func detailFixture(t *testing.T, tasks, events int) (*fake, model) {
 	return f, press(t, m, keyEnter)
 }
 
-func TestDetailFocusCyclesAndWraps(t *testing.T) {
+func TestDetailSectionsCycleAndWrap(t *testing.T) {
 	_, m := detailFixture(t, 2, 2)
-	if m.det.focus != focusParams {
-		t.Fatalf("initial focus: %v", m.det.focus)
+	if m.det.section != sectionParams {
+		t.Fatalf("initial section: %v", m.det.section)
 	}
 	steps := []struct {
 		key  tea.KeyMsg
-		want detailFocus
+		want detailSection
 	}{
-		{keyTab, focusTasks},
-		{keyTab, focusEvents},
-		{keyTab, focusParams},
-		{keyShiftTab, focusEvents},
-		{keyShiftTab, focusTasks},
-		{keyShiftTab, focusParams},
+		{keyTab, sectionTasks},
+		{keyTab, sectionEvents},
+		{keyTab, sectionParams},
+		{keyShiftTab, sectionEvents},
+		{keyShiftTab, sectionTasks},
+		{keyShiftTab, sectionParams},
 	}
 	for _, step := range steps {
 		m = press(t, m, step.key)
-		if m.det.focus != step.want {
-			t.Fatalf("%v: focus %v, want %v", step.key, m.det.focus, step.want)
+		if m.det.section != step.want {
+			t.Fatalf("%v: section %v, want %v", step.key, m.det.section, step.want)
 		}
-	}
-	if !strings.Contains(stripANSI(m.View()), "▸ PARAMETERS") {
-		t.Fatalf("focused pane is not marked:\n%s", m.View())
 	}
 }
 
-func TestDetailPaneCursorsIndependent(t *testing.T) {
+func TestDetailOnlyActiveSectionRenders(t *testing.T) {
+	_, m := detailFixture(t, 2, 2)
+
+	params := stripANSI(m.View())
+	if !strings.Contains(params, "InternetGatewayDevice") {
+		t.Fatalf("parameters not rendered:\n%s", params)
+	}
+	if strings.Contains(params, "#1 set failed") {
+		t.Fatalf("tasks rendered while Parameters is active:\n%s", params)
+	}
+
+	m = press(t, m, keyTab)
+	tasks := stripANSI(m.View())
+	if !strings.Contains(tasks, "#1 set failed") || !strings.Contains(tasks, "Tasks 1 of 2") {
+		t.Fatalf("tasks section:\n%s", tasks)
+	}
+	if strings.Contains(tasks, "InternetGatewayDevice") || strings.Contains(tasks, "periodic") {
+		t.Fatalf("another section rendered with Tasks:\n%s", tasks)
+	}
+
+	m = press(t, m, keyTab)
+	events := stripANSI(m.View())
+	if !strings.Contains(events, "periodic") || !strings.Contains(events, "Events 1 of 2") {
+		t.Fatalf("events section:\n%s", events)
+	}
+	if strings.Contains(events, "#1 set failed") {
+		t.Fatalf("tasks rendered with Events:\n%s", events)
+	}
+
+	// Enter is a no-op outside Parameters: there is no task or event detail.
+	before := len(m.det.eventView)
+	m = press(t, m, keyEnter)
+	if len(m.det.eventView) != before || m.det.section != sectionEvents {
+		t.Fatal("enter changed the events section")
+	}
+}
+
+func TestDetailSectionsKeepCursorAndFilter(t *testing.T) {
 	_, m := detailFixture(t, 20, 10)
+
 	m = press(t, m, keyTab) // tasks
 	for i := 0; i < 3; i++ {
 		m = press(t, m, keyDown)
 	}
+	m = press(t, m, typed("/"))
+	m = press(t, m, typed("invalid"))
+	m = press(t, m, keyEnter)
+
 	m = press(t, m, keyTab) // events
 	m = press(t, m, keyDown)
+	m = press(t, m, typed("/"))
+	m = press(t, m, typed("periodic"))
+	m = press(t, m, keyEnter)
+
+	m = press(t, m, keyTab) // parameters
+	m = press(t, m, typed("/"))
+	m = press(t, m, typed("manufacturer"))
+	m = press(t, m, keyEnter)
+
+	m = press(t, m, keyShiftTab) // back to events
+	if m.det.section != sectionEvents || m.det.eventFilter.text != "periodic" || m.det.eventCur.pos != 1 {
+		t.Fatalf("events state lost: section=%v filter=%q pos=%d",
+			m.det.section, m.det.eventFilter.text, m.det.eventCur.pos)
+	}
 	m = press(t, m, keyShiftTab) // back to tasks
-	if m.det.taskCur.pos != 3 {
-		t.Fatalf("task cursor reset: %d", m.det.taskCur.pos)
+	if m.det.section != sectionTasks || m.det.taskFilter.text != "invalid" || m.det.taskCur.pos != 3 {
+		t.Fatalf("tasks state lost: section=%v filter=%q pos=%d",
+			m.det.section, m.det.taskFilter.text, m.det.taskCur.pos)
 	}
-	if m.det.eventCur.pos != 1 {
-		t.Fatalf("event cursor: %d", m.det.eventCur.pos)
-	}
-	m = press(t, m, keyTab) // events again
-	if m.det.eventCur.pos != 1 {
-		t.Fatalf("event cursor lost on return: %d", m.det.eventCur.pos)
+	m = press(t, m, keyShiftTab) // back to parameters
+	if m.det.filter.text != "manufacturer" {
+		t.Fatalf("parameter filter lost: %q", m.det.filter.text)
 	}
 }
 
@@ -1449,8 +1503,8 @@ func TestDetailTaskListScrollsToLastRow(t *testing.T) {
 		t.Fatalf("cursor after G: %d", m.det.taskCur.pos)
 	}
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "TASKS  20 of 20") {
-		t.Fatalf("task header does not show the position:\n%s", view)
+	if !strings.Contains(view, "Tasks 20 of 20") {
+		t.Fatalf("task position missing from the section bar:\n%s", view)
 	}
 	if !strings.Contains(view, "#20 set failed") {
 		t.Fatalf("last task row not rendered:\n%s", view)
@@ -1467,31 +1521,213 @@ func countTaskRows(lines []string) int {
 	return n
 }
 
-func TestDetailPaneRowsGrowWithHeight(t *testing.T) {
+func TestDetailSectionRowsGrowWithHeight(t *testing.T) {
 	f, _ := detailFixture(t, 20, 10)
 	render := func(h int) int {
 		m := newTestModel(f)
 		m.w, m.h = 120, h
 		m = settle(t, m, m.Init()())
 		m = press(t, m, keyEnter)
+		m = press(t, m, keyTab) // tasks
 		return countTaskRows(viewLines(m))
 	}
 	short, tall := render(30), render(46)
-	if short < 2 {
+	if short < 5 {
 		t.Fatalf("only %d task rows at 30 lines", short)
 	}
 	if tall <= short {
 		t.Fatalf("rows did not grow with the terminal: %d at 46, %d at 30", tall, short)
 	}
+	if tall > 20 {
+		t.Fatalf("rendered %d rows for 20 loaded tasks", tall)
+	}
 
-	// Never more rows than were loaded.
 	f2, _ := detailFixture(t, 2, 1)
 	m := newTestModel(f2)
 	m.w, m.h = 120, 46
 	m = settle(t, m, m.Init()())
 	m = press(t, m, keyEnter)
+	m = press(t, m, keyTab)
 	if got := countTaskRows(viewLines(m)); got > 2 {
 		t.Fatalf("rendered %d task rows for 2 tasks", got)
+	}
+}
+
+func TestDetailTasksBadge(t *testing.T) {
+	dev := device(1)
+	f := &fake{devices: []store.Device{dev}, tasks: []store.Task{
+		{ID: 1, DeviceID: dev.ID, Name: "get", Status: "done", UpdatedAt: testNow},
+		{ID: 2, DeviceID: dev.ID, Name: "set", Status: "failed", FaultCode: intp(9003), Fault: "Invalid arguments", UpdatedAt: testNow},
+		{ID: 3, DeviceID: dev.ID, Name: "reboot", Status: "done", UpdatedAt: testNow},
+	}}
+	m := newTestModel(f)
+	m.w, m.h = 120, 30
+	m = settle(t, m, m.Init()())
+	m = press(t, m, keyEnter)
+	if view := stripANSI(m.View()); !strings.Contains(view, "Tasks 3 · 1 failed") {
+		t.Fatalf("failure badge missing:\n%s", view)
+	}
+
+	f2 := &fake{devices: []store.Device{dev}, tasks: []store.Task{
+		{ID: 1, DeviceID: dev.ID, Name: "get", Status: "done", UpdatedAt: testNow},
+	}}
+	m = newTestModel(f2)
+	m.w, m.h = 120, 30
+	m = settle(t, m, m.Init()())
+	m = press(t, m, keyEnter)
+	view := stripANSI(m.View())
+	if strings.Contains(view, "failed") {
+		t.Fatalf("badge shown without failures:\n%s", view)
+	}
+	if !strings.Contains(view, "Tasks 1") {
+		t.Fatalf("task count missing:\n%s", view)
+	}
+}
+
+func TestDetailSlashFiltersActiveSection(t *testing.T) {
+	_, m := detailFixture(t, 20, 10)
+
+	m = press(t, m, keyTab) // tasks
+	m = press(t, m, typed("/"))
+	m = press(t, m, typed("invalid"))
+	m = press(t, m, keyEnter)
+	if len(m.det.taskView) != 20 {
+		t.Fatalf("task filter: %d rows", len(m.det.taskView))
+	}
+	m = press(t, m, typed("/"))
+	m = press(t, m, tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = press(t, m, typed("zzz"))
+	m = press(t, m, keyEnter)
+	if len(m.det.taskView) != 0 {
+		t.Fatalf("task filter kept %d rows", len(m.det.taskView))
+	}
+	if !strings.Contains(stripANSI(m.View()), `no task matches "zzz"`) {
+		t.Fatalf("task empty state missing:\n%s", m.View())
+	}
+
+	m = press(t, m, keyTab) // events
+	m = press(t, m, typed("/"))
+	m = press(t, m, typed("periodic"))
+	m = press(t, m, keyEnter)
+	if len(m.det.eventView) != 10 {
+		t.Fatalf("event filter: %d rows", len(m.det.eventView))
+	}
+	m = press(t, m, typed("/"))
+	m = press(t, m, tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = press(t, m, typed("zzz"))
+	m = press(t, m, keyEnter)
+	if !strings.Contains(stripANSI(m.View()), `no event matches "zzz"`) {
+		t.Fatalf("event empty state missing:\n%s", m.View())
+	}
+
+	m = press(t, m, keyTab) // parameters
+	m = press(t, m, typed("/"))
+	m = press(t, m, typed("manufacturer"))
+	if len(m.det.rows) != 3 { // root, DeviceInfo, and the matching leaf
+		t.Fatalf("parameter filter: %d rows", len(m.det.rows))
+	}
+	if !strings.Contains(stripANSI(m.View()), "Parameters  1 of 1") {
+		t.Fatalf("parameter match count missing:\n%s", m.View())
+	}
+}
+
+func TestDetailEscClearsFilterThenActs(t *testing.T) {
+	_, m := detailFixture(t, 2, 2)
+	root := "InternetGatewayDevice."
+	if !m.det.expanded[root] {
+		t.Fatal("fixture root did not auto-expand")
+	}
+
+	m = press(t, m, keyTab) // tasks
+	m = press(t, m, typed("/"))
+	m = press(t, m, typed("zzz"))
+	m = press(t, m, keyEnter)
+	m = press(t, m, keyEsc)
+	if m.det.taskFilter.text != "" || m.det.section != sectionTasks || m.screen != scrDevice {
+		t.Fatalf("esc did not clear the task filter: %q section=%v", m.det.taskFilter.text, m.det.section)
+	}
+	m = press(t, m, keyEsc)
+	if m.screen != scrDevice {
+		t.Fatalf("esc on Tasks left the detail: %v", m.screen)
+	}
+
+	m = press(t, m, keyShiftTab) // parameters
+	m = press(t, m, keyEsc)      // collapse the root
+	if m.det.expanded[root] {
+		t.Fatal("esc did not collapse the root")
+	}
+	m = press(t, m, keyEsc) // leave
+	if m.screen != scrDevices {
+		t.Fatalf("esc did not leave the detail: %v", m.screen)
+	}
+}
+
+func rootFixture(t *testing.T, paths ...string) (*fake, model) {
+	t.Helper()
+	dev := device(1)
+	params := make(map[string]store.Param, len(paths))
+	for _, p := range paths {
+		params[p] = store.Param{Value: "v"}
+	}
+	f := &fake{devices: []store.Device{dev}, params: map[string]map[string]store.Param{dev.ID: params}}
+	m := newTestModel(f)
+	m.w, m.h = 120, 40
+	m = settle(t, m, m.Init()())
+	return f, press(t, m, keyEnter)
+}
+
+func TestDetailSingleRootExpandsOneLevel(t *testing.T) {
+	_, m := rootFixture(t,
+		"InternetGatewayDevice.DeviceInfo.Manufacturer",
+		"InternetGatewayDevice.DeviceInfo.SoftwareVersion",
+		"InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID",
+		"InternetGatewayDevice.ManagementServer.URL",
+	)
+	if !m.det.expanded["InternetGatewayDevice."] {
+		t.Fatal("the only root was not expanded on load")
+	}
+	for _, child := range []string{
+		"InternetGatewayDevice.DeviceInfo.",
+		"InternetGatewayDevice.LANDevice.",
+	} {
+		if m.det.expanded[child] {
+			t.Fatalf("%s expanded too: the rule is one level", child)
+		}
+	}
+	// Root plus its three children, nothing deeper.
+	if len(m.det.rows) != 4 {
+		t.Fatalf("rows after auto-expand: %d, want 4", len(m.det.rows))
+	}
+}
+
+func TestDetailSingleRootCollapseSurvivesRefresh(t *testing.T) {
+	_, m := rootFixture(t,
+		"InternetGatewayDevice.DeviceInfo.Manufacturer",
+		"InternetGatewayDevice.ManagementServer.URL",
+	)
+	if len(m.det.rows) != 3 {
+		t.Fatalf("rows after auto-expand: %d", len(m.det.rows))
+	}
+	m = press(t, m, keyEsc) // explicit collapse of the root
+	if m.det.expanded["InternetGatewayDevice."] || len(m.det.rows) != 1 {
+		t.Fatalf("root not collapsed: %v rows=%d", m.det.expanded, len(m.det.rows))
+	}
+	m = press(t, m, typed("r"))
+	if m.det.expanded["InternetGatewayDevice."] || len(m.det.rows) != 1 {
+		t.Fatalf("refresh reopened the collapsed root: %v rows=%d", m.det.expanded, len(m.det.rows))
+	}
+}
+
+func TestDetailTwoRootsStayCollapsed(t *testing.T) {
+	_, m := rootFixture(t,
+		"Device.DeviceInfo.Manufacturer",
+		"InternetGatewayDevice.DeviceInfo.Manufacturer",
+	)
+	if len(m.det.rows) != 2 {
+		t.Fatalf("rows: %d, want the two roots only", len(m.det.rows))
+	}
+	if len(m.det.expanded) != 0 {
+		t.Fatalf("a root was expanded: %v", m.det.expanded)
 	}
 }
 
@@ -1516,35 +1752,5 @@ func TestDetailHelpLineIsTrimmed(t *testing.T) {
 		if !strings.Contains(help, want) {
 			t.Fatalf("help line lacks %q: %q", want, help)
 		}
-	}
-}
-
-func TestDetailSlashFromEventsFocusesParams(t *testing.T) {
-	_, m := detailFixture(t, 2, 2)
-	m = press(t, m, keyTab)
-	m = press(t, m, keyTab) // events
-	if m.det.focus != focusEvents {
-		t.Fatalf("focus: %v", m.det.focus)
-	}
-	m = press(t, m, typed("/"))
-	if m.det.focus != focusParams || !m.det.filter.editing {
-		t.Fatalf("slash did not focus the tree: focus=%v editing=%v", m.det.focus, m.det.filter.editing)
-	}
-	m = press(t, m, typed("manu"))
-	if !strings.Contains(stripANSI(m.View()), "PARAMETERS  0 of") {
-		t.Fatalf("filter did not apply:\n%s", m.View())
-	}
-}
-
-func TestDetailEscFocusOrder(t *testing.T) {
-	_, m := detailFixture(t, 2, 2)
-	m = press(t, m, keyTab) // tasks
-	m = press(t, m, keyEsc)
-	if m.det.focus != focusParams || m.screen != scrDevice {
-		t.Fatalf("esc from tasks: focus=%v screen=%v", m.det.focus, m.screen)
-	}
-	m = press(t, m, keyEsc)
-	if m.screen != scrDevices {
-		t.Fatalf("esc from parameters did not leave the detail: %v", m.screen)
 	}
 }

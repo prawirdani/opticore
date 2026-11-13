@@ -166,12 +166,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.det.device = msg.device
 		}
 		m.det.tasks = msg.tasks
-		m.det.taskCur.clamp(len(msg.tasks))
+		m.det.refilterTasks()
 		m.det.events = msg.events
-		m.det.eventCur.clamp(len(msg.events))
+		m.det.refilterEvents()
 		if msg.params != nil {
 			m.det.takeCache(msg.params)
 			m.det.pages[""] = buildPage(msg.params, "")
+			m.det.applyRoot()
 			m.det.rebuild()
 		}
 		m.det.at = m.now()
@@ -243,7 +244,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.det.tasks = msg.rows
-		m.det.taskCur.clamp(len(msg.rows))
+		m.det.refilterTasks()
 		return m, nil
 	}
 	return m, nil
@@ -278,13 +279,13 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.switchTo(scrJobs)
 	case "tab":
 		if m.screen == scrDevice {
-			m.det.cycleFocus(1)
+			m.det.cycleSection(1)
 			return m, nil
 		}
 		return m, m.switchTo(m.nextTab(1))
 	case "shift+tab":
 		if m.screen == scrDevice {
-			m.det.cycleFocus(-1)
+			m.det.cycleSection(-1)
 			return m, nil
 		}
 		return m, m.switchTo(m.nextTab(-1))
@@ -293,9 +294,6 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.refresh(), m.checkServing())
 	case "/":
 		if f := m.activeFilter(); f != nil {
-			if m.screen == scrDevice {
-				m.det.focus = focusParams
-			}
 			f.begin()
 		}
 		return m, nil
@@ -376,6 +374,12 @@ func (m *model) activeFilter() *filter {
 	case scrJobs:
 		return &m.jobs.filter
 	case scrDevice:
+		switch m.det.section {
+		case sectionTasks:
+			return &m.det.taskFilter
+		case sectionEvents:
+			return &m.det.eventFilter
+		}
 		return &m.det.filter
 	}
 	return nil
@@ -391,7 +395,14 @@ func (m *model) refilterRows() {
 	case scrJobs:
 		m.jobs.refilter()
 	case scrDevice:
-		m.det.rebuild()
+		switch m.det.section {
+		case sectionTasks:
+			m.det.refilterTasks()
+		case sectionEvents:
+			m.det.refilterEvents()
+		default:
+			m.det.rebuild()
+		}
 	}
 }
 
@@ -430,11 +441,11 @@ func (m *model) moveCursor(delta int) {
 	case scrJobs:
 		m.jobs.cur.move(delta, len(m.jobs.view))
 	case scrDevice:
-		switch m.det.focus {
-		case focusTasks:
-			m.det.taskCur.move(delta, len(m.det.tasks))
-		case focusEvents:
-			m.det.eventCur.move(delta, len(m.det.events))
+		switch m.det.section {
+		case sectionTasks:
+			m.det.taskCur.move(delta, len(m.det.taskView))
+		case sectionEvents:
+			m.det.eventCur.move(delta, len(m.det.eventView))
 		default:
 			m.det.cur.move(delta, len(m.det.rows))
 		}
@@ -559,7 +570,7 @@ func (m *model) openJob() tea.Cmd {
 }
 
 func (m *model) detailToggle() tea.Cmd {
-	if m.det.focus != focusParams || m.det.filtering() {
+	if m.det.section != sectionParams || m.det.filtering() {
 		return nil // only the tree expands; the search tree is already open
 	}
 	row, ok := m.det.selectedRow()
@@ -567,11 +578,11 @@ func (m *model) detailToggle() tea.Cmd {
 		return nil
 	}
 	if m.det.expanded[row.prefix] {
-		delete(m.det.expanded, row.prefix)
+		m.det.setExpanded(row.prefix, false)
 		m.det.rebuild()
 		return nil
 	}
-	m.det.expanded[row.prefix] = true
+	m.det.setExpanded(row.prefix, true)
 	if _, ok := m.det.pages[row.prefix]; ok {
 		m.det.rebuild()
 		m.det.selectChild()
@@ -672,14 +683,13 @@ func queuedStatus(verb string, tasks []store.Task) string {
 func (m *model) back() tea.Cmd {
 	switch m.screen {
 	case scrDevice:
-		if m.det.focus != focusParams {
-			m.det.focus = focusParams
+		if f := m.activeFilter(); f != nil && f.text != "" {
+			f.text = ""
+			f.editing = false
+			m.refilterRows()
 			return nil
 		}
-		if m.det.filtering() || m.det.filter.text != "" {
-			m.det.filter.text = ""
-			m.det.filter.editing = false
-			m.det.rebuild()
+		if m.det.section != sectionParams {
 			return nil
 		}
 		if m.det.collapse() {

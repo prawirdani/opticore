@@ -17,7 +17,10 @@ var (
 	stMuted  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	stHead   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250"))
 	stSel    = lipgloss.NewStyle().Reverse(true)
-	stBad    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	// stTabActive marks the selected section tab: reversed and bold, so the
+	// signal survives a monochrome terminal.
+	stTabActive = lipgloss.NewStyle().Bold(true).Reverse(true)
+	stBad       = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 )
 
 // defaultInformInterval is the fallback used when a device never reported

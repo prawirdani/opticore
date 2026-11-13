@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -71,27 +72,34 @@ func paramValue(p store.Param) string {
 	return p.Value
 }
 
-// detailFocus is which of the three detail panes owns the arrow keys.
-type detailFocus int
+// detailSection is the tab selected under the device header. Only that
+// section renders, with the whole body height.
+type detailSection int
 
 const (
-	focusParams detailFocus = iota
-	focusTasks
-	focusEvents
+	sectionParams detailSection = iota
+	sectionTasks
+	sectionEvents
 )
 
 type detailPane struct {
-	device   store.Device
-	pages    map[string]paramPage
-	expanded map[string]bool
-	rows     []paramRow
-	cur      cursor
-	tasks    []store.Task
-	taskCur  cursor
-	events   []store.Event
-	eventCur cursor
-	focus    detailFocus
-	at       time.Time
+	device        store.Device
+	pages         map[string]paramPage
+	expanded      map[string]bool
+	rows          []paramRow
+	cur           cursor
+	tasks         []store.Task
+	taskView      []store.Task
+	taskCur       cursor
+	events        []store.Event
+	eventView     []store.Event
+	eventCur      cursor
+	section       detailSection
+	taskFilter    filter
+	eventFilter   filter
+	root          string // the only root object, "" when there is not exactly one
+	autoCollapsed bool   // the operator closed that root; do not reopen it
+	at            time.Time
 
 	// all and paths are the whole cached parameter set from the first read.
 	// The tree fetches more pages lazily, but the search filters these, so it
@@ -138,9 +146,78 @@ func (d *detailPane) resetTree() {
 	d.cur.clamp(0)
 }
 
-// cycleFocus moves the focus ring one pane forward or back, wrapping.
-func (d *detailPane) cycleFocus(dir int) {
-	d.focus = detailFocus((int(d.focus) + dir + 3) % 3)
+// cycleSection moves the section tabs one forward or back, wrapping.
+func (d *detailPane) cycleSection(dir int) {
+	d.section = detailSection((int(d.section) + dir + 3) % 3)
+}
+
+// setExpanded opens or closes one path. Closing the single root is an explicit
+// decision that survives a refresh.
+func (d *detailPane) setExpanded(prefix string, on bool) {
+	if on {
+		d.expanded[prefix] = true
+		if prefix == d.root {
+			d.autoCollapsed = false
+		}
+		return
+	}
+	delete(d.expanded, prefix)
+	if prefix == d.root {
+		d.autoCollapsed = true
+	}
+}
+
+// applyRoot expands the only root object one level on load, so a device whose
+// whole cache sits under InternetGatewayDevice. opens showing DeviceInfo,
+// LANDevice and the rest. Its children stay collapsed.
+func (d *detailPane) applyRoot() {
+	d.root = ""
+	page := d.pages[""]
+	if len(page.children) == 1 && page.children[0].object {
+		d.root = page.children[0].name + "."
+	}
+	if d.root == "" || d.autoCollapsed {
+		return
+	}
+	if _, ok := d.pages[d.root]; !ok {
+		d.pages[d.root] = buildPage(d.all, d.root)
+	}
+	d.expanded[d.root] = true
+}
+
+// refilterTasks narrows the loaded task rows by name, status and fault text.
+func (d *detailPane) refilterTasks() {
+	q := strings.ToLower(strings.TrimSpace(d.taskFilter.text))
+	d.taskView = d.taskView[:0]
+	for _, t := range d.tasks {
+		if q == "" || containsFold(q, t.Name, t.Status, taskFault(t), "#"+strconv.FormatInt(t.ID, 10)) {
+			d.taskView = append(d.taskView, t)
+		}
+	}
+	d.taskCur.clamp(len(d.taskView))
+}
+
+// refilterEvents narrows the loaded event rows by type and detail text.
+func (d *detailPane) refilterEvents() {
+	q := strings.ToLower(strings.TrimSpace(d.eventFilter.text))
+	d.eventView = d.eventView[:0]
+	for _, e := range d.events {
+		if q == "" || containsFold(q, e.Type, string(e.Detail)) {
+			d.eventView = append(d.eventView, e)
+		}
+	}
+	d.eventCur.clamp(len(d.eventView))
+}
+
+// failedTasks counts the rows the Tasks badge reports.
+func (d *detailPane) failedTasks() int {
+	n := 0
+	for _, t := range d.tasks {
+		if t.Status == "failed" {
+			n++
+		}
+	}
+	return n
 }
 
 // filtering reports whether a parameter search is narrowing the tree.
@@ -280,13 +357,13 @@ func (d *detailPane) collapse() bool {
 		return false
 	}
 	if row.object && d.expanded[row.prefix] {
-		delete(d.expanded, row.prefix)
+		d.setExpanded(row.prefix, false)
 		d.rebuild()
 		return true
 	}
 	for p := parentPrefix(row.prefix); p != ""; p = parentPrefix(p) {
 		if d.expanded[p] {
-			delete(d.expanded, p)
+			d.setExpanded(p, false)
 			d.rebuild()
 			d.selectPrefix(p)
 			return true
@@ -310,97 +387,98 @@ func (m model) detailBody(h int) []string {
 		return []string{stMuted.Render(" no device loaded")}
 	}
 	out := m.detailHeader()
-	out = append(out, "")
-
-	// Three pane headers, then the rows the rest of the body can hold. The
-	// split grows with the terminal, so a tall screen shows more of each list.
-	avail := h - len(out) - 3
-	if avail < 3 {
-		avail = 3
+	out = append(out, "", m.sectionBar())
+	rows := h - len(out)
+	if rows < 1 {
+		rows = 1
 	}
-	paramsH, tasksH, eventsH := paneHeights(avail)
-	out = append(out, m.paramsPane(paramsH)...)
-	out = append(out, m.taskPane(tasksH)...)
-	return append(out, m.eventPane(eventsH)...)
+	switch d.section {
+	case sectionTasks:
+		return append(out, m.tasksSection(rows)...)
+	case sectionEvents:
+		return append(out, m.eventsSection(rows)...)
+	}
+	return append(out, m.paramsSection(rows)...)
 }
 
-// paneHeights splits the rows left after the three pane headers: one row each
-// to start, a quarter more for each list, and the tree takes the rest.
-func paneHeights(avail int) (params, tasks, events int) {
-	if avail < 3 {
-		avail = 3
-	}
-	list := (avail - 3) / 4
-	if list < 2 && avail >= 9 {
-		list = 2
-	}
-	if list < 1 {
-		list = 1
-	}
-	if max := (avail - 1) / 2; list > max {
-		list = max
-	}
-	tasks, events = 1+list, 1+list
-	params = avail - tasks - events
-	if params < 1 {
-		params = 1
-	}
-	return params, tasks, events
-}
-
-// paneHeader marks the focused pane with a triangle and bold text, and dims
-// the others, so focus survives a monochrome terminal.
-func (m model) paneHeader(title string, pos, total int, focused bool) string {
-	if total > 0 {
-		title = fmt.Sprintf("%s  %d of %d", title, pos+1, total)
-	} else {
-		title += "  0 of 0"
-	}
-	return m.paneHeaderText(title, focused)
-}
-
-func (m model) paneHeaderText(title string, focused bool) string {
-	if focused {
-		return stHead.Render("▸ " + title)
-	}
-	return stMuted.Render("  " + title)
-}
-
-func (m model) paramsPane(h int) []string {
-	d := &m.det
-	title := "PARAMETERS"
+func (d *detailPane) paramsLabel() string {
 	if d.filtering() {
-		title = fmt.Sprintf("PARAMETERS  %d of %d  /%s", d.matches, len(d.paths), strings.TrimSpace(d.filter.text))
+		return fmt.Sprintf("Parameters  %d of %d  /%s", d.matches, len(d.paths), strings.TrimSpace(d.filter.text))
 	}
-	out := []string{m.paneHeaderText(title, d.focus == focusParams)}
+	return "Parameters"
+}
+
+func (d *detailPane) tasksLabel() string {
+	label := fmt.Sprintf("Tasks %d", len(d.tasks))
+	if d.section == sectionTasks && len(d.taskView) > 0 {
+		label = fmt.Sprintf("Tasks %d of %d", d.taskCur.pos+1, len(d.taskView))
+	}
+	if failed := d.failedTasks(); failed > 0 {
+		label += fmt.Sprintf(" · %d failed", failed)
+	}
+	return label
+}
+
+func (d *detailPane) eventsLabel() string {
+	if d.section == sectionEvents && len(d.eventView) > 0 {
+		return fmt.Sprintf("Events %d of %d", d.eventCur.pos+1, len(d.eventView))
+	}
+	return fmt.Sprintf("Events %d", len(d.events))
+}
+
+// sectionBar is the tab strip under the device header: the active section is
+// reversed and bold, the rest are dim, and the position shows in one place
+// only.
+func (m model) sectionBar() string {
+	labels := []string{m.det.paramsLabel(), m.det.tasksLabel(), m.det.eventsLabel()}
+	var b strings.Builder
+	for i, label := range labels {
+		if i > 0 {
+			b.WriteString(stMuted.Render("  |  "))
+		}
+		if detailSection(i) == m.det.section {
+			b.WriteString(stTabActive.Render(label))
+		} else {
+			b.WriteString(stMuted.Render(label))
+		}
+	}
+	return clip(b.String(), m.w)
+}
+
+func (m model) paramsSection(h int) []string {
+	d := &m.det
 	switch {
 	case len(d.pages) == 0:
-		return append(out, stMuted.Render("  loading…"))
+		return []string{stMuted.Render(" loading…")}
 	case d.filtering() && len(d.paths) == 0:
-		return append(out, stMuted.Render("  no cached parameters to search; the next Inform fills them"))
+		return []string{stMuted.Render("  no cached parameters to search; the next Inform fills them")}
 	case d.filtering() && d.matches == 0:
-		return append(out, stMuted.Render(fmt.Sprintf("  no parameter matches %q; esc clears the filter", strings.TrimSpace(d.filter.text))))
+		return []string{stMuted.Render(fmt.Sprintf("  no parameter matches %q; esc clears the filter", strings.TrimSpace(d.filter.text)))}
 	case len(d.rows) == 0:
-		return append(out, stMuted.Render("  no cached parameters; the next Inform fills them"))
+		return []string{stMuted.Render("  no cached parameters; the next Inform fills them")}
 	}
 	start, end := d.cur.window(len(d.rows), h)
+	out := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
-		out = append(out, m.paramLine(d.rows[i], d.focus == focusParams && i == d.cur.pos))
+		out = append(out, m.paramLine(d.rows[i], i == d.cur.pos))
 	}
 	return out
 }
 
-func (m model) taskPane(h int) []string {
+func (m model) tasksSection(h int) []string {
 	d := &m.det
-	out := []string{m.paneHeader("TASKS", d.taskCur.pos, len(d.tasks), d.focus == focusTasks)}
-	if len(d.tasks) == 0 {
-		return append(out, stMuted.Render("  none for this device"))
+	switch {
+	case len(d.tasks) == 0:
+		return []string{stMuted.Render("  none for this device")}
+	case len(d.taskView) == 0:
+		return []string{stMuted.Render(fmt.Sprintf("  no task matches %q; esc clears the filter", strings.TrimSpace(d.taskFilter.text)))}
 	}
 	now := m.now()
-	start, end := d.taskCur.window(len(d.tasks), h)
+	start, end := d.taskCur.window(len(d.taskView), h)
+	out := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
-		t := d.tasks[i]
-		selected := d.focus == focusTasks && i == d.taskCur.pos
+		t := d.taskView[i]
+		selected := i == d.taskCur.pos
 		marker := "  "
 		if selected {
 			marker = "› "
@@ -418,17 +496,20 @@ func (m model) taskPane(h int) []string {
 	return out
 }
 
-func (m model) eventPane(h int) []string {
+func (m model) eventsSection(h int) []string {
 	d := &m.det
-	out := []string{m.paneHeader("EVENTS", d.eventCur.pos, len(d.events), d.focus == focusEvents)}
-	if len(d.events) == 0 {
-		return append(out, stMuted.Render("  none for this device"))
+	switch {
+	case len(d.events) == 0:
+		return []string{stMuted.Render("  none for this device")}
+	case len(d.eventView) == 0:
+		return []string{stMuted.Render(fmt.Sprintf("  no event matches %q; esc clears the filter", strings.TrimSpace(d.eventFilter.text)))}
 	}
 	now := m.now()
-	start, end := d.eventCur.window(len(d.events), h)
+	start, end := d.eventCur.window(len(d.eventView), h)
+	out := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
-		e := d.events[i]
-		selected := d.focus == focusEvents && i == d.eventCur.pos
+		e := d.eventView[i]
+		selected := i == d.eventCur.pos
 		marker := "  "
 		if selected {
 			marker = "› "
