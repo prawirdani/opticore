@@ -362,10 +362,31 @@ make vet fmt lint
 without it, and they run in a throwaway schema so they can share one database.
 Locally, `make db-test` creates `opticore_test` if it is missing.
 
-CI runs gofmt, vet, build and `go test -race` against a PostgreSQL service.
+CI runs gofmt, vet, build, `go test -race` against a PostgreSQL service, and a
+container build.
+
 `make release major|minor|patch` tags the next `v*` version from the latest tag
-and nothing else; pushing that tag builds static `linux/amd64` and
-`linux/arm64` binaries with checksums and publishes a GitHub release.
+and nothing else. Pushing that tag:
+
+- builds static binaries for `linux`, `darwin` and `windows`, on `amd64` and
+  `arm64`, with `-X main.version` set to the tag, plus `checksums.txt`;
+- publishes them as a GitHub release;
+- builds and pushes the multi-arch image
+  `ghcr.io/<owner>/opticore:<tag>` and `:latest`.
+
+## Container image
+
+```sh
+docker run --rm -p 7547:7547 -p 8081:8081 \
+  -e OPTICORE_DB_DSN='postgres://user:pass@db:5432/opticore?sslmode=disable' \
+  -e OPTICORE_SECRET_KEY="$(openssl rand -base64 32)" \
+  ghcr.io/<owner>/opticore:latest
+```
+
+The image is distroless and runs as non-root, with `serve` as the command, so
+migrations are applied on start. It carries CA certificates for an `https` hook
+URL. Mount nothing; all configuration is environment variables. Port `8082` in
+`EXPOSE` is reserved for the file server and is not served yet.
 
 ## Not implemented yet
 

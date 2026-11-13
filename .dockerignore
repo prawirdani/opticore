@@ -1,0 +1,8 @@
+.git
+.github
+bin
+tmp
+PLAN.md
+.env
+*.test
+*.out
